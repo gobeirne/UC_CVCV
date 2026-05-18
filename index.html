@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>UC Te Reo Māori Speech Audiometry</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -37,26 +38,24 @@
       <section id="screen-calibration" class="screen">
         <div class="card">
           <h2>Calibration</h2>
-          <p class="hint">Use the UCLing-style workflow: set the output volume, play the calibration sound, measure dB(A), then enter the measured value. The app will scale later presentation levels from this reference.</p>
-          <div class="grid two">
-            <label>Calibration measured level, dB(A)
-              <input id="calMeasured" type="number" step="0.1" value="65">
-            </label>
-            <label>Calibration file
-              <select id="calFile">
-                <option value="noise">noise</option>
-                <option value="masking">masking</option>
-                <option value="TeReo_calib">TeReo_calib</option>
-                <option value="NZEng_calib">NZEng_calib</option>
-              </select>
-            </label>
-          </div>
+          <p class="hint">Follow the UCKea calibration workflow: turn the device volume fully up, play the looping calibration sound, measure the output in dB(A), then stop and enter the measured value.</p>
+
           <div class="actions wrap">
-            <button id="playCalBtn" type="button">Play calibration</button>
-            <button id="stopCalBtn" type="button" class="secondary">Stop</button>
-            <button id="saveCalBtn" type="button">Save calibration</button>
-            <button id="skipCalBtn" type="button" class="secondary">Skip for now</button>
+            <button id="calibrateBtn" type="button">Calibration</button>
+            <button id="testCalBtn" type="button" class="secondary" hidden>Test Calibrated Sound</button>
+            <button id="skipCalBtn" type="button" class="secondary">Continue</button>
           </div>
+
+          <div class="volume-panel">
+            <label>Output level
+              <input id="outputLevel" type="range" min="-100" max="0" step="0.1" value="0">
+            </label>
+            <div class="level-readout">
+              <strong id="outputLevelLabel">0 dB FS</strong>
+              <span id="modeBadge">Uncalibrated Mode</span>
+            </div>
+          </div>
+
           <p id="calStatus" class="status"></p>
         </div>
       </section>
@@ -82,6 +81,7 @@
             </label>
             <label>Masker level, dB(A)
               <input id="maskLevel" type="number" step="1" value="40">
+              <span id="maskLevelHint" class="inline-hint">Can be changed during testing</span>
             </label>
           </div>
 
@@ -132,6 +132,20 @@
               <button id="playWordBtn" type="button" class="big">Play “Kōrero mai...” + kupu</button>
               <button id="repeatWordBtn" type="button" class="secondary">Replay kupu only</button>
               <button id="toggleMaskBtn" type="button" class="secondary">Start masker</button>
+            </div>
+
+            <div class="masker-live">
+              <label>Masker level, dB(A)
+                <input id="maskLevelLive" type="number" step="1" value="40">
+              </label>
+              <label>Masker ear
+                <select id="maskEarLive">
+                  <option value="off">Off</option>
+                  <option value="left">Left</option>
+                  <option value="right">Right</option>
+                  <option value="binaural">Binaural</option>
+                </select>
+              </label>
             </div>
 
             <h3>Fast score</h3>

@@ -76,7 +76,7 @@ const V_EQ = { "a":"a","aː":"a","e":"e","eː":"e","i":"i","iː":"i","o":"o","o�
 
 const state = {
   client: {},
-  calibration: { measuredDbA: null },
+  calibration: { measuredDbA: null, timestamp: null, isCalibrated: false, sliderMinDb: -100, sliderMaxDb: 0, currentSliderDb: 0 },
   queue: [],
   currentListIndex: -1,
   currentTrialIndex: 0,
@@ -89,7 +89,9 @@ const state = {
     ctx: null,
     masker: null,
     maskerGain: null,
-    calSource: null
+    calSource: null,
+    calNode: null,
+    decodedBuffers: {}
   }
 };
 
@@ -104,24 +106,46 @@ function init() {
     $("listChoice").appendChild(opt);
   }
   bindEvents();
+  setupCalibrationSlider();
   drawPI();
   loadDraftIntoForm();
+  offerStoredCalibration();
 }
 
 function bindEvents() {
   $("toCalibrationBtn").onclick = () => { readClientForm(); show("screen-calibration"); };
   $("restoreBtn").onclick = restoreSession;
-  $("playCalBtn").onclick = playCalibration;
-  $("stopCalBtn").onclick = stopCalibration;
-  $("saveCalBtn").onclick = saveCalibration;
+  $("calibrateBtn").onclick = toggleCalibration;
+  $("testCalBtn").onclick = testCalibratedSound;
   $("skipCalBtn").onclick = () => show("screen-setup");
+  $("outputLevel").addEventListener("input", updateOutputLevelFromSlider);
+  $("outputLevel").addEventListener("change", updateOutputLevelFromSlider);
+  $("outputLevel").addEventListener("touchend", updateOutputLevelFromSlider);
 
   $("stimEar").onchange = () => {
     const ear = $("stimEar").value;
     if (ear === "left") $("maskEar").value = "right";
     if (ear === "right") $("maskEar").value = "left";
     if (ear === "binaural") $("maskEar").value = "off";
+    syncMaskerControls();
   };
+
+  $("maskLevel").addEventListener("input", () => {
+    $("maskLevelLive").value = $("maskLevel").value;
+    updateLiveMasker();
+  });
+  $("maskEar").addEventListener("change", () => {
+    $("maskEarLive").value = $("maskEar").value;
+    updateLiveMasker();
+  });
+  $("maskLevelLive").addEventListener("input", () => {
+    $("maskLevel").value = $("maskLevelLive").value;
+    updateLiveMasker();
+  });
+  $("maskEarLive").addEventListener("change", () => {
+    $("maskEar").value = $("maskEarLive").value;
+    updateLiveMasker();
+  });
 
   $("addListBtn").onclick = () => addList(Number($("listChoice").value), Number($("listLevel").value));
   $("addRandomBtn").onclick = () => addRandomList(Number($("listLevel").value));
@@ -192,6 +216,9 @@ function restoreSession() {
   const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
   if (!saved) return alert("No saved session found.");
   Object.assign(state, JSON.parse(saved));
+  setupCalibrationSlider();
+  if (state.calibration?.isCalibrated) $("testCalBtn").hidden = false;
+  syncMaskerControls();
   renderQueue();
   drawPI();
   show("screen-setup");
@@ -217,7 +244,12 @@ function ensureAudio() {
 }
 
 function soundKey(filename) {
-  return filename.split("_")[0];
+  // Strip path, extension, and final calibration suffix only.
+  // This preserves meaningful underscores in names like KōreroMai_01_+1.6dB.wav.
+  return filename
+    .replace(/^.*\//, "")
+    .replace(/\.(mp3|wav)$/i, "")
+    .replace(/_[+-]?\d+(?:\.\d+)?dB$/i, "");
 }
 
 function fileForWord(word) {
@@ -228,7 +260,7 @@ function fileForWord(word) {
 
 function candidatesForBase(base) {
   const known = KNOWN_SOUND_FILES.filter(f => soundKey(f) === base).map(f => `sounds/${f}`);
-  return [...known, `sounds/${base}.mp3`, `sounds/${base}.wav`];
+  return [...known, `sounds/${base}.wav`, `sounds/${base}.mp3`];
 }
 
 function pickKoreroMai() {
@@ -252,9 +284,13 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
 }
 
 function gainForLevel(levelDbA) {
-  const ref = state.calibration.measuredDbA;
-  if (!ref || Number.isNaN(ref)) return 1;
-  return Math.pow(10, (Number(levelDbA) - Number(ref)) / 20);
+  if (state.calibration.isCalibrated && state.calibration.measuredDbA !== null) {
+    const attenuation = Number(state.calibration.measuredDbA) - Number(levelDbA);
+    return Math.pow(10, -attenuation / 20);
+  }
+  // Uncalibrated fallback treats requested level as dB FS if negative, otherwise full scale.
+  const dbfs = Math.min(0, Number(levelDbA));
+  return Math.pow(10, dbfs / 20);
 }
 
 async function playFirstAvailable(bases, ear, levelDbA, loop=false) {
@@ -274,30 +310,156 @@ async function playFirstAvailable(bases, ear, levelDbA, loop=false) {
   throw lastError || new Error("No audio file found");
 }
 
-async function playCalibration() {
-  stopCalibration();
-  $("calStatus").textContent = "Playing calibration...";
-  try {
-    const base = $("calFile").value;
-    state.audio.calSource = await playFirstAvailable([base], "binaural", Number($("calMeasured").value), true);
-  } catch {
-    $("calStatus").textContent = "Could not play calibration sound. Check that the file exists in /sounds.";
-  }
+function setupCalibrationSlider() {
+  const slider = $("outputLevel");
+  slider.min = state.calibration.sliderMinDb ?? -100;
+  slider.max = state.calibration.sliderMaxDb ?? 0;
+  slider.step = 0.1;
+  slider.value = state.calibration.currentSliderDb ?? slider.max;
+  updateOutputLevelFromSlider();
 }
 
-function stopCalibration() {
-  if (state.audio.calSource) {
-    state.audio.calSource.el.pause();
-    state.audio.calSource.el.currentTime = 0;
-    state.audio.calSource = null;
+function updateOutputLevelFromSlider() {
+  const slider = $("outputLevel");
+  let rawValue = parseFloat(slider.value);
+  if (state.calibration.isCalibrated && state.calibration.measuredDbA !== null) {
+    const max = parseFloat(slider.max);
+    const tolerance = 0.25;
+    const snapped = Math.abs(rawValue - max) <= tolerance ? max : Math.round(rawValue / 5) * 5;
+    slider.value = snapped;
+    state.calibration.currentSliderDb = snapped;
+    $("outputLevelLabel").textContent = `${snapped} dB A`;
+    $("modeBadge").textContent = "Calibrated Mode";
+    $("modeBadge").classList.add("calibrated");
+  } else {
+    const snapped = Math.round(rawValue / 5) * 5;
+    slider.value = snapped;
+    state.calibration.currentSliderDb = snapped;
+    $("outputLevelLabel").textContent = `${snapped} dB FS`;
+    $("modeBadge").textContent = "Uncalibrated Mode";
+    $("modeBadge").classList.remove("calibrated");
   }
-}
-
-function saveCalibration() {
-  state.calibration.measuredDbA = Number($("calMeasured").value);
-  stopCalibration();
   saveSession();
-  show("screen-setup");
+}
+
+function applyCalibrationLevel(level, timestamp = new Date().toISOString()) {
+  state.calibration.measuredDbA = level;
+  state.calibration.timestamp = timestamp;
+  state.calibration.isCalibrated = true;
+  state.calibration.sliderMaxDb = level;
+  state.calibration.sliderMinDb = Math.floor(level / 5) * 5 - 60;
+  state.calibration.currentSliderDb = level;
+  const slider = $("outputLevel");
+  slider.min = state.calibration.sliderMinDb;
+  slider.max = state.calibration.sliderMaxDb;
+  slider.step = 0.1;
+  slider.value = level;
+  $("testCalBtn").hidden = false;
+  updateOutputLevelFromSlider();
+  saveSession();
+}
+
+function offerStoredCalibration() {
+  const saved = localStorage.getItem("ucTeReoSpeechAudiometryCalibration");
+  if (!saved) return;
+  try {
+    const data = JSON.parse(saved);
+    if (!data.level) return;
+    const when = data.timestamp ? new Date(data.timestamp).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "medium" }) : "an earlier session";
+    const useIt = confirm(`You last calibrated this device to ${data.level} dB A on ${when}.\nUse this calibration?`);
+    if (useIt) {
+      alert("Remember to turn your device volume to full.");
+      applyCalibrationLevel(Number(data.level), data.timestamp);
+    }
+  } catch {}
+}
+
+async function decodeFirstAvailable(bases) {
+  const ctx = ensureAudio();
+  for (const base of bases) {
+    const urls = base.includes("/") ? [base] : candidatesForBase(base);
+    for (const url of urls) {
+      if (state.audio.decodedBuffers[url]) return state.audio.decodedBuffers[url];
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) continue;
+        const arr = await resp.arrayBuffer();
+        const decoded = await ctx.decodeAudioData(arr);
+        state.audio.decodedBuffers[url] = decoded;
+        return decoded;
+      } catch {}
+    }
+  }
+  throw new Error("No decodable calibration sound found");
+}
+
+function stopCalibrationSound() {
+  if (state.audio.calNode) {
+    try { state.audio.calNode.stop(); } catch {}
+    state.audio.calNode = null;
+  }
+}
+
+async function toggleCalibration() {
+  const btn = $("calibrateBtn");
+  if (state.audio.calNode) {
+    stopCalibrationSound();
+    btn.textContent = "Calibration";
+    btn.classList.remove("active");
+    const measured = prompt("Enter measured calibration level (in dB A):");
+    if (!measured || isNaN(measured)) return;
+    const level = parseFloat(measured);
+    applyCalibrationLevel(level);
+    localStorage.setItem("ucTeReoSpeechAudiometryCalibration", JSON.stringify({ level, timestamp: state.calibration.timestamp }));
+    $("calStatus").textContent = `Calibrated to ${level} dB A.`;
+    return;
+  }
+
+  stopCurrentStimulusIfAny();
+  ensureAudio();
+  let buffer;
+  try {
+    buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
+  } catch {
+    alert("No calibration sound file found.\nPlease add calib.wav to the sounds/ folder.");
+    return;
+  }
+  alert("Turn your device volume all the way up, then tap OK to play the calibration tone.");
+  const source = state.audio.ctx.createBufferSource();
+  source.buffer = buffer;
+  source.loop = true;
+  source.connect(state.audio.ctx.destination);
+  source.start();
+  state.audio.calNode = source;
+  btn.textContent = "Stop & Enter Level";
+  btn.classList.add("active");
+  $("calStatus").textContent = "Calibration sound playing.";
+}
+
+async function testCalibratedSound() {
+  if (!state.calibration.isCalibrated) return;
+  stopCurrentStimulusIfAny();
+  let buffer;
+  try {
+    buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
+  } catch {
+    alert("No calibration sound file found.");
+    return;
+  }
+  const source = state.audio.ctx.createBufferSource();
+  const gain = state.audio.ctx.createGain();
+  source.buffer = buffer;
+  gain.gain.value = gainForLevel(state.calibration.currentSliderDb);
+  source.connect(gain).connect(state.audio.ctx.destination);
+  source.start();
+  state.audio.calNode = source;
+  source.onended = () => {
+    if (state.audio.calNode === source) state.audio.calNode = null;
+  };
+}
+
+function stopCurrentStimulusIfAny() {
+  // Placeholder hook: media-element stimulus playback is short-lived, masker is intentionally independent.
 }
 
 function addList(listNumber, level) {
@@ -338,6 +500,7 @@ function startTesting() {
   if (!state.queue.length) addRandomList(Number($("listLevel").value));
   state.currentListIndex = state.queue.findIndex(q => q.status === "queued");
   if (state.currentListIndex < 0) state.currentListIndex = 0;
+  syncMaskerControls();
   beginCurrentList();
   show("screen-test");
 }
@@ -465,6 +628,23 @@ async function playCurrent(withCarrier) {
   }
 }
 
+function syncMaskerControls() {
+  if ($("maskLevelLive")) $("maskLevelLive").value = $("maskLevel").value;
+  if ($("maskEarLive")) $("maskEarLive").value = $("maskEar").value;
+}
+
+function updateLiveMasker() {
+  syncMaskerControls();
+  if (state.audio.masker) {
+    state.audio.masker.gain.gain.value = gainForLevel(Number($("maskLevel").value));
+    state.audio.masker.pan.pan.value = $("maskEar").value === "left" ? -1 : $("maskEar").value === "right" ? 1 : 0;
+    if ($("maskEar").value === "off") stopMasker();
+  } else if ($("maskEar").value !== "off" && $("screen-test").classList.contains("active")) {
+    startMasker();
+  }
+  saveSession();
+}
+
 async function startMaskerIfNeeded() {
   stopMasker();
   if ($("maskEar").value !== "off") await startMasker();
@@ -490,6 +670,7 @@ function stopMasker() {
 }
 
 function toggleMasker() {
+  syncMaskerControls();
   if (state.audio.masker) stopMasker();
   else startMasker();
 }
@@ -655,7 +836,7 @@ function showReport() {
       </div>
       <div>
         <p><b>Clinician:</b> ${state.client.clinician || ""}</p>
-        <p><b>Calibration reference:</b> ${state.calibration.measuredDbA ?? "not set"} dB(A)</p>
+        <p><b>Calibration reference:</b> ${state.calibration.isCalibrated ? state.calibration.measuredDbA + " dB(A)" : "not set"}</p>
         <p><b>Notes:</b> ${state.client.notes || ""}</p>
       </div>
     </div>
