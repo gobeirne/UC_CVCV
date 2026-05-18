@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en-NZ">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>UC Te Reo Māori Speech Audiometry</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header class="uc-header">
+      <img id="ucLogo" src="assets/UClogo.png" alt="University of Canterbury logo" onerror="this.style.display='none'">
+      <div>
+        <h1>Te reo Māori CVCV Speech Audiometry</h1>
+        <p>University of Canterbury Hearing Clinic</p>
+      </div>
+    </header>
+
+    <main>
+      <section id="screen-client" class="screen active">
+        <div class="card">
+          <h2>Client details</h2>
+          <div class="grid two">
+            <label>Client name <input id="clientName" autocomplete="name"></label>
+            <label>NHI / ID <input id="clientId"></label>
+            <label>Date <input id="sessionDate" type="date"></label>
+            <label>Clinician <input id="clinician"></label>
+          </div>
+          <label>Notes <textarea id="sessionNotes" rows="3"></textarea></label>
+          <div class="actions">
+            <button id="restoreBtn" type="button" class="secondary">Restore saved session</button>
+            <button id="toCalibrationBtn" type="button">Continue</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-calibration" class="screen">
+        <div class="card">
+          <h2>Calibration</h2>
+          <p class="hint">Use the UCLing-style workflow: set the output volume, play the calibration sound, measure dB(A), then enter the measured value. The app will scale later presentation levels from this reference.</p>
+          <div class="grid two">
+            <label>Calibration measured level, dB(A)
+              <input id="calMeasured" type="number" step="0.1" value="65">
+            </label>
+            <label>Calibration file
+              <select id="calFile">
+                <option value="noise">noise</option>
+                <option value="masking">masking</option>
+                <option value="TeReo_calib">TeReo_calib</option>
+                <option value="NZEng_calib">NZEng_calib</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions wrap">
+            <button id="playCalBtn" type="button">Play calibration</button>
+            <button id="stopCalBtn" type="button" class="secondary">Stop</button>
+            <button id="saveCalBtn" type="button">Save calibration</button>
+            <button id="skipCalBtn" type="button" class="secondary">Skip for now</button>
+          </div>
+          <p id="calStatus" class="status"></p>
+        </div>
+      </section>
+
+      <section id="screen-setup" class="screen">
+        <div class="card">
+          <h2>Test setup</h2>
+          <div class="grid three">
+            <label>Stimulus ear
+              <select id="stimEar">
+                <option value="left">Left</option>
+                <option value="right">Right</option>
+                <option value="binaural">Binaural</option>
+              </select>
+            </label>
+            <label>Masker ear
+              <select id="maskEar">
+                <option value="off">Off</option>
+                <option value="left">Left</option>
+                <option value="right" selected>Right</option>
+                <option value="binaural">Binaural</option>
+              </select>
+            </label>
+            <label>Masker level, dB(A)
+              <input id="maskLevel" type="number" step="1" value="40">
+            </label>
+          </div>
+
+          <h3>List queue</h3>
+          <div class="setup-row">
+            <label>Choose list
+              <select id="listChoice"></select>
+            </label>
+            <label>Level, dB(A)
+              <input id="listLevel" type="number" step="1" value="60">
+            </label>
+            <button id="addListBtn" type="button">Add list</button>
+            <button id="addRandomBtn" type="button" class="secondary">Add random list</button>
+          </div>
+
+          <div class="setup-row">
+            <label>Number of random lists
+              <input id="randomCount" type="number" min="1" max="10" value="1">
+            </label>
+            <label>Random list level, dB(A)
+              <input id="randomLevel" type="number" step="1" value="60">
+            </label>
+            <button id="addNRandomBtn" type="button" class="secondary">Add n random</button>
+          </div>
+
+          <div id="queueChips" class="chips"></div>
+
+          <div class="actions">
+            <button id="startBtn" type="button">Start testing</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="screen-test" class="screen">
+        <div class="test-layout">
+          <div class="card">
+            <div class="test-top">
+              <div>
+                <h2 id="currentWord">—</h2>
+                <p id="currentMeta" class="hint">—</p>
+              </div>
+              <button id="abandonBtn" class="small danger" title="Abandon list">×</button>
+            </div>
+
+            <div id="progressIndicator" class="chips"></div>
+
+            <div class="actions wrap">
+              <button id="playWordBtn" type="button" class="big">Play “Kōrero mai...” + kupu</button>
+              <button id="repeatWordBtn" type="button" class="secondary">Replay kupu only</button>
+              <button id="toggleMaskBtn" type="button" class="secondary">Start masker</button>
+            </div>
+
+            <h3>Fast score</h3>
+            <div class="score-buttons">
+              <button data-score="1">1</button>
+              <button data-score="2">2</button>
+              <button data-score="3">3</button>
+              <button data-score="4">4</button>
+            </div>
+
+            <h3>Phoneme scoring</h3>
+            <div id="targetPhonemes" class="phoneme-row"></div>
+            <details>
+              <summary>Advanced response phoneme selection</summary>
+              <div id="advancedColumns" class="advanced-grid"></div>
+            </details>
+
+            <label>Comment / heard response
+              <input id="trialComment" placeholder="Optional">
+            </label>
+
+            <div class="actions">
+              <button id="clearScoreBtn" type="button" class="secondary">Clear</button>
+              <button id="nextTrialBtn" type="button">Next</button>
+            </div>
+          </div>
+
+          <aside class="card">
+            <h3>Performance intensity</h3>
+            <canvas id="piCanvas" width="420" height="300"></canvas>
+            <div class="legend">
+              <span><b class="blue">×</b> Left</span>
+              <span><b class="red">○</b> Right</span>
+              <span><b>S</b> Binaural</span>
+            </div>
+            <h3>Exports</h3>
+            <div class="actions stack">
+              <button id="downloadJsonBtn" type="button" class="secondary">Download JSON</button>
+              <button id="downloadTsvBtn" type="button" class="secondary">Download TSV</button>
+              <button id="reportBtn" type="button" class="secondary">Report / print PDF</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="screen-report" class="screen">
+        <div class="card report-card">
+          <div class="actions no-print">
+            <button id="backToTestBtn" type="button" class="secondary">Back</button>
+            <button id="printBtn" type="button">Print / save PDF</button>
+          </div>
+          <div id="reportContent"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="abandonDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>Abandon this list?</h2>
+      <p>Data already entered will be saved. The remaining trials in this list will be marked abandoned.</p>
+      <menu>
+        <button value="cancel" class="secondary">Cancel</button>
+        <button id="confirmAbandonBtn" value="abandon" class="danger">Abandon list</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
