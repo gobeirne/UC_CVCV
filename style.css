@@ -389,3 +389,31 @@ menu {
     grid-template-columns: 1fr;
   }
 }
+
+
+.score-buttons button[data-score="0"] { background: #b91c1c; }
+.score-buttons button[data-score="1"] { background: #dc641f; }
+.score-buttons button[data-score="2"] { background: #d97706; }
+.score-buttons button[data-score="3"] { background: #7aa21d; }
+.score-buttons button[data-score="4"] { background: #15803d; }
+
+.score-buttons button.fast-selected {
+  outline: 4px solid #111;
+  outline-offset: 2px;
+}
+
+.phoneme-option.correct-selected,
+.phoneme-target.selected.correct-selected {
+  border-color: #15803d !important;
+  background: #ecfdf3 !important;
+}
+
+.phoneme-option.incorrect-selected {
+  border-color: #b91c1c !important;
+  background: #fef2f2 !important;
+}
+
+.report-pi {
+  margin: 1rem 0 1.5rem;
+  max-width: 520px;
+}

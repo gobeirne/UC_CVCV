@@ -112,6 +112,26 @@ function init() {
   offerStoredCalibration();
 }
 
+function setupFastScoreButtons() {
+  const box = document.querySelector(".score-buttons");
+  if (!box) return;
+  box.innerHTML = "";
+  for (let i = 0; i <= 4; i++) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.dataset.score = String(i);
+    btn.textContent = String(i);
+    btn.onclick = () => {
+      state.trialScore = i;
+      state.targetSelections = [0,1,2,3].map(idx => idx < i);
+      state.responseSelections = [null,null,null,null];
+      markScoreButton();
+      renderSelectionColours();
+    };
+    box.appendChild(btn);
+  }
+}
+
 function bindEvents() {
   $("toCalibrationBtn").onclick = () => { readClientForm(); show("screen-calibration"); };
   $("restoreBtn").onclick = restoreSession;
@@ -156,9 +176,7 @@ function bindEvents() {
   $("repeatWordBtn").onclick = () => playCurrent(false);
   $("toggleMaskBtn").onclick = toggleMasker;
 
-  document.querySelectorAll(".score-buttons button").forEach(btn => {
-    btn.onclick = () => { state.trialScore = Number(btn.dataset.score); markScoreButton(); };
-  });
+  setupFastScoreButtons();
   $("clearScoreBtn").onclick = clearScoring;
   $("nextTrialBtn").onclick = nextTrial;
   $("abandonBtn").onclick = () => $("abandonDialog").showModal();
@@ -172,9 +190,16 @@ function bindEvents() {
 
   document.addEventListener("keydown", (e) => {
     if (!$("screen-test").classList.contains("active")) return;
-    if (["1","2","3","4"].includes(e.key)) {
+    if (["0","1","2","3","4"].includes(e.key)) {
       state.trialScore = Number(e.key);
+      state.targetSelections = [0,1,2,3].map(idx => idx < state.trialScore);
+      state.responseSelections = [null,null,null,null];
       markScoreButton();
+      renderSelectionColours();
+    }
+    if (e.code === "Space" && !["INPUT","TEXTAREA","SELECT","BUTTON"].includes(document.activeElement.tagName)) {
+      e.preventDefault();
+      playCurrent(true);
     }
     if (e.key === "Enter") nextTrial();
     if (e.key === "Escape") $("abandonDialog").showModal();
@@ -539,6 +564,7 @@ function renderTrial() {
   $("currentMeta").textContent = `List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length} — ${translation}`;
   renderTargetPhonemes([c1,v1,c2,v2]);
   renderAdvanced([c1,v1,c2,v2]);
+  renderSelectionColours();
   renderQueue();
 }
 
@@ -554,6 +580,7 @@ function renderTargetPhonemes(phonemes) {
       div.classList.toggle("selected", state.targetSelections[idx]);
       state.trialScore = state.targetSelections.filter(Boolean).length;
       markScoreButton();
+      renderSelectionColours();
     };
     row.appendChild(div);
   });
@@ -576,8 +603,9 @@ function renderAdvanced(targets) {
         [...col.querySelectorAll(".phoneme-option")].forEach(x => x.classList.remove("selected"));
         btn.classList.add("selected");
         state.responseSelections[idx] = p === "–" ? "–" : p;
-        state.trialScore = computeAdvancedScore(targets, state.responseSelections);
+        state.trialScore = computeCurrentScore();
         markScoreButton();
+        renderSelectionColours();
       };
       col.appendChild(btn);
     });
@@ -595,9 +623,49 @@ function computeAdvancedScore(targets, responses) {
   return targets.reduce((sum, t, i) => sum + (equivalent(t, responses[i]) ? 1 : 0), 0);
 }
 
+function computeCurrentScore() {
+  const trial = currentTrial();
+  if (!trial) return 0;
+  const targets = trial.word.slice(1,5);
+  let score = 0;
+  targets.forEach((target, idx) => {
+    const advanced = state.responseSelections[idx];
+    if (advanced) {
+      if (equivalent(target, advanced)) score++;
+    } else if (state.targetSelections[idx]) {
+      score++;
+    }
+  });
+  return score;
+}
+
+function renderSelectionColours() {
+  const trial = currentTrial();
+  if (!trial) return;
+  const targets = trial.word.slice(1,5);
+
+  document.querySelectorAll(".phoneme-target").forEach((el, idx) => {
+    el.classList.toggle("selected", !!state.targetSelections[idx]);
+    el.classList.toggle("correct-selected", !!state.targetSelections[idx]);
+  });
+
+  document.querySelectorAll(".advanced-col").forEach((col, idx) => {
+    const target = targets[idx];
+    col.querySelectorAll(".phoneme-option").forEach(btn => {
+      const p = btn.textContent;
+      const isChosen = state.responseSelections[idx] === p;
+      const isTopSelected = state.targetSelections[idx] && equivalent(target, p);
+
+      btn.classList.toggle("selected", isChosen);
+      btn.classList.toggle("correct-selected", isChosen && equivalent(target, p) || isTopSelected);
+      btn.classList.toggle("incorrect-selected", isChosen && !equivalent(target, p));
+    });
+  });
+}
+
 function markScoreButton() {
   document.querySelectorAll(".score-buttons button").forEach(btn => {
-    btn.style.outline = Number(btn.dataset.score) === state.trialScore ? "4px solid #ffbf00" : "";
+    btn.classList.toggle("fast-selected", Number(btn.dataset.score) === state.trialScore);
   });
 }
 
@@ -606,7 +674,7 @@ function clearScoring() {
   state.targetSelections = [false,false,false,false];
   state.responseSelections = [null,null,null,null];
   $("trialComment").value = "";
-  document.querySelectorAll(".phoneme-target,.phoneme-option").forEach(x => x.classList.remove("selected"));
+  document.querySelectorAll(".phoneme-target,.phoneme-option").forEach(x => x.classList.remove("selected", "correct-selected", "incorrect-selected"));
   markScoreButton();
 }
 
@@ -681,7 +749,7 @@ function nextTrial() {
   const q = currentQueueItem();
   if (!trial || !q) return;
   const targets = trial.word.slice(1,5);
-  const score = state.trialScore ?? state.targetSelections.filter(Boolean).length;
+  const score = state.trialScore ?? computeCurrentScore();
   state.results.push({
     timestamp: new Date().toISOString(),
     client: state.client,
@@ -838,6 +906,8 @@ function showReport() {
     return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${r.stimulusEar}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
   }).join("");
   const summaryRows = summaries.map(s => `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${s.ear}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`).join("");
+  drawPI();
+  const piDataUrl = $("piCanvas") ? $("piCanvas").toDataURL("image/png") : "";
   $("reportContent").innerHTML = `
     <h1>Te reo Māori CVCV Speech Audiometry Report</h1>
     <div class="report-grid">
@@ -852,6 +922,8 @@ function showReport() {
         <p><b>Notes:</b> ${state.client.notes || ""}</p>
       </div>
     </div>
+    <h2>Performance intensity function</h2>
+    ${piDataUrl ? `<img class="report-pi" src="${piDataUrl}" alt="Performance intensity plot">` : ""}
     <h2>Summary</h2>
     <table class="report-table"><thead><tr><th>List</th><th>Level dB(A)</th><th>Ear</th><th>Trials</th><th>% correct</th></tr></thead><tbody>${summaryRows}</tbody></table>
     <h2>Trial data</h2>
