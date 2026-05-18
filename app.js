@@ -567,14 +567,15 @@ function renderAdvanced(targets) {
     const col = document.createElement("div");
     col.className = "advanced-col";
     col.innerHTML = `<h4>${idx + 1}: /${target}/</h4>`;
-    PHONEMES[type].forEach(p => {
+    ["–", ...PHONEMES[type]].forEach(p => {
       const btn = document.createElement("div");
-      btn.className = "phoneme-option";
+      btn.className = "phoneme-option" + (p === "–" ? " blank-option" : "");
       btn.textContent = p;
+      btn.title = p === "–" ? "Blank / no response for this position" : "";
       btn.onclick = () => {
         [...col.querySelectorAll(".phoneme-option")].forEach(x => x.classList.remove("selected"));
         btn.classList.add("selected");
-        state.responseSelections[idx] = p;
+        state.responseSelections[idx] = p === "–" ? "–" : p;
         state.trialScore = computeAdvancedScore(targets, state.responseSelections);
         markScoreButton();
       };
@@ -585,7 +586,7 @@ function renderAdvanced(targets) {
 }
 
 function equivalent(target, response) {
-  if (!response) return false;
+  if (!response || response === "–") return false;
   if (V_EQ[target] && V_EQ[response]) return V_EQ[target] === V_EQ[response];
   return target === response;
 }
@@ -824,7 +825,18 @@ function downloadTsv() {
 function showReport() {
   readClientForm();
   const summaries = listSummaries();
-  const rows = state.results.map(r => `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${r.stimulusEar}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${r.responsePhonemes.filter(Boolean).join(" ")}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`).join("");
+  const rows = state.results.map(r => {
+    const combinedResponse = r.targetPhonemes.map((target, idx) => {
+      const advanced = r.responsePhonemes?.[idx];
+      const selectedCorrect = r.selectedTargetCorrectness?.[idx];
+
+      if (advanced) return advanced;
+      if (selectedCorrect) return target;
+      return "–";
+    }).join(" ");
+
+    return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${r.stimulusEar}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
+  }).join("");
   const summaryRows = summaries.map(s => `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${s.ear}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`).join("");
   $("reportContent").innerHTML = `
     <h1>Te reo Māori CVCV Speech Audiometry Report</h1>
