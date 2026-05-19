@@ -853,7 +853,7 @@ function renderTargetPhonemes(phonemes) {
     div.onclick = () => {
       state.targetSelections[idx] = !state.targetSelections[idx];
       div.classList.toggle("selected", state.targetSelections[idx]);
-      state.trialScore = state.targetSelections.filter(Boolean).length;
+      state.trialScore = computeCurrentScore();
       markScoreButton();
       renderSelectionColours();
     };
@@ -875,7 +875,7 @@ function renderAdvanced(targets) {
       btn.textContent = p;
       btn.title = p === "–" ? "Blank / no response for this position" : "";
       btn.onclick = () => {
-        [...col.querySelectorAll(".phoneme-option")].forEach(x => x.classList.remove("selected"));
+        [...col.querySelectorAll(".phoneme-option")].forEach(x => x.classList.remove("selected", "correct-selected", "incorrect-selected"));
         btn.classList.add("selected");
         state.responseSelections[idx] = p === "–" ? "–" : p;
         state.trialScore = computeCurrentScore();
@@ -905,7 +905,7 @@ function computeCurrentScore() {
   let score = 0;
   targets.forEach((target, idx) => {
     const advanced = state.responseSelections[idx];
-    if (advanced) {
+    if (advanced !== null && advanced !== undefined && advanced !== "") {
       if (equivalent(target, advanced)) score++;
     } else if (state.targetSelections[idx]) {
       score++;
@@ -931,13 +931,15 @@ function renderSelectionColours() {
 
   document.querySelectorAll(".advanced-col").forEach((col, idx) => {
     const target = targets[idx];
+    const explicitResponse = state.responseSelections[idx];
+
     col.querySelectorAll(".phoneme-option").forEach(btn => {
       const p = btn.textContent;
-      const isChosen = state.responseSelections[idx] === p;
-      const isTopSelected = state.targetSelections[idx] && equivalent(target, p);
+      const isChosen = explicitResponse === p;
+      const isTopSelected = !explicitResponse && state.targetSelections[idx] && equivalent(target, p);
 
       btn.classList.toggle("selected", isChosen);
-      btn.classList.toggle("correct-selected", isChosen && equivalent(target, p) || isTopSelected);
+      btn.classList.toggle("correct-selected", (isChosen && equivalent(target, p)) || isTopSelected);
       btn.classList.toggle("incorrect-selected", isChosen && !equivalent(target, p));
     });
   });
@@ -1074,7 +1076,7 @@ function nextTrial() {
   const q = currentQueueItem();
   if (!trial || !q) return;
   const targets = trial.word.slice(1,5);
-  const score = state.trialScore ?? computeCurrentScore();
+  const score = computeCurrentScore();
   const resultPayload = {
     timestamp: new Date().toISOString(),
     client: state.client,
@@ -1286,7 +1288,7 @@ function showReport() {
       const advanced = r.responsePhonemes?.[idx];
       const selectedCorrect = r.selectedTargetCorrectness?.[idx];
 
-      if (advanced) return advanced;
+      if (advanced !== null && advanced !== undefined && advanced !== "") return advanced;
       if (selectedCorrect) return target;
       return "–";
     }).join(" ");
