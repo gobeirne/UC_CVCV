@@ -24,6 +24,7 @@
           <div class="grid two">
             <label>Client name <input id="clientName" autocomplete="name"></label>
             <label>NHI / ID <input id="clientId"></label>
+            <label>Date of birth <input id="clientDob" type="date"></label>
             <label>Date <input id="sessionDate" type="date"></label>
             <label>Clinician <input id="clinician"></label>
           </div>
@@ -64,11 +65,21 @@
         <div class="card">
           <h2>Test setup</h2>
           <div class="grid three">
-            <label>Stimulus ear
-              <select id="stimEar">
+            <label>Presentation condition
+              <select id="presentationCondition">
                 <option value="left">Left</option>
                 <option value="right">Right</option>
                 <option value="binaural">Binaural</option>
+                <option value="soundfield">Sound field</option>
+                <option value="aided">Aided</option>
+                <option value="unaided">Unaided</option>
+              </select>
+            </label>
+            <label>Stimulus routing
+              <select id="stimEar">
+                <option value="left">Left channel</option>
+                <option value="right">Right channel</option>
+                <option value="binaural">Binaural channels</option>
               </select>
             </label>
             <label>Masker ear
@@ -80,8 +91,17 @@
               </select>
             </label>
             <label>Masker level, dB(A)
-              <input id="maskLevel" type="number" step="1" value="40">
+              <input id="maskLevel" type="number" step="5" value="40">
               <span id="maskLevelHint" class="inline-hint">Can be changed during testing</span>
+            </label>
+            <label>Transducer
+              <select id="transducer">
+                <option value="insert earphones">Insert earphones</option>
+                <option value="headphones">Headphones</option>
+                <option value="sound field speaker">Sound field speaker</option>
+                <option value="bone conductor">Bone conductor</option>
+                <option value="other">Other</option>
+              </select>
             </label>
           </div>
 
@@ -91,7 +111,7 @@
               <select id="listChoice"></select>
             </label>
             <label>Level, dB(A)
-              <input id="listLevel" type="number" step="1" value="60">
+              <input id="listLevel" type="number" step="5" value="60">
             </label>
             <button id="addListBtn" type="button">Add list</button>
             <button id="addRandomBtn" type="button" class="secondary">Add random list</button>
@@ -102,12 +122,15 @@
               <input id="randomCount" type="number" min="1" max="10" value="1">
             </label>
             <label>Random list level, dB(A)
-              <input id="randomLevel" type="number" step="1" value="60">
+              <input id="randomLevel" type="number" step="5" value="60">
             </label>
             <button id="addNRandomBtn" type="button" class="secondary">Add n random</button>
           </div>
 
-          <div id="queueChips" class="chips"></div>
+          <div class="queue-toolbar">
+            <button id="addQueueBtn" type="button" class="small-add">+ Add list</button>
+          </div>
+          <div id="queueChips" class="chips queue-chips"></div>
 
           <div class="actions">
             <button id="startBtn" type="button">Start testing</button>
@@ -135,7 +158,7 @@
 
             <div class="masker-live">
               <label>Masker level, dB(A)
-                <input id="maskLevelLive" type="number" step="1" value="40">
+                <input id="maskLevelLive" type="number" step="5" value="40">
               </label>
               <label>Masker ear
                 <select id="maskEarLive">
@@ -161,7 +184,7 @@
               <button data-score="4">4</button>
             </div>
 
-            <h3>Phoneme scoring</h3>
+            <div class="phoneme-heading"><h3 id="phonemeHeading">Phoneme scoring</h3></div>
             <div id="targetPhonemes" class="phoneme-row"></div>
             <details>
               <summary>Advanced response phoneme selection</summary>
@@ -184,7 +207,7 @@
             <div class="legend">
               <span><b class="blue">×</b> Left</span>
               <span><b class="red">○</b> Right</span>
-              <span><b>S</b> Binaural</span>
+              <span><b>B</b> Binaural</span><span><b>S/A/U</b> SF/Aided/Unaided</span>
             </div>
             <h3>Exports</h3>
             <div class="actions stack">
@@ -207,6 +230,26 @@
       </section>
     </main>
   </div>
+
+  <dialog id="queueDialog">
+    <form method="dialog" class="dialog-card">
+      <h2 id="queueDialogTitle">Edit list</h2>
+      <input id="queueEditIndex" type="hidden">
+      <div class="grid two">
+        <label>List
+          <select id="queueListNumber"></select>
+        </label>
+        <label>Level, dB(A)
+          <input id="queueLevel" type="number" step="5" value="60">
+        </label>
+      </div>
+      <menu>
+        <button id="queueDeleteBtn" value="delete" class="danger" type="button">Delete</button>
+        <button value="cancel" class="secondary">Cancel</button>
+        <button id="queueSaveBtn" value="save" type="button">Save</button>
+      </menu>
+    </form>
+  </dialog>
 
   <dialog id="abandonDialog">
     <form method="dialog" class="dialog-card">

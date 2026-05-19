@@ -551,3 +551,96 @@ details summary {
     margin: .14rem 0;
   }
 }
+
+
+/* v9 layout and queue management */
+.queue-toolbar {
+  display: flex;
+  justify-content: flex-start;
+  margin: .4rem 0;
+}
+
+.small-add {
+  padding: .5rem .8rem;
+  font-size: .95rem;
+}
+
+.queue-chip {
+  cursor: pointer;
+  user-select: none;
+}
+
+.queue-chip.dragging {
+  opacity: .45;
+}
+
+.queue-chip .queue-arrows {
+  margin-left: .35rem;
+  opacity: .75;
+  font-size: .85em;
+}
+
+.kupu-translation {
+  font-size: .95rem;
+  font-weight: 500;
+  color: #666;
+  margin-left: .45rem;
+}
+
+.phoneme-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .75rem;
+  margin-top: .55rem;
+}
+
+.phoneme-heading h3 {
+  margin: 0;
+}
+
+.phoneme-target {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  font-weight: 650 !important;
+  letter-spacing: .01em;
+}
+
+.test-layout {
+  grid-template-columns: minmax(560px, 1.25fr) minmax(380px, .75fr);
+  align-items: start;
+}
+
+@media (min-width: 1180px) {
+  main {
+    width: min(1500px, calc(100vw - 1.5rem));
+  }
+
+  .test-layout {
+    grid-template-columns: minmax(720px, 1.45fr) minmax(420px, .8fr);
+  }
+
+  .advanced-grid {
+    grid-template-columns: repeat(4, minmax(120px, 1fr));
+  }
+
+  aside.card {
+    min-height: 640px;
+  }
+
+  #piCanvas {
+    max-height: 430px;
+  }
+}
+
+@media (max-width: 900px) {
+  .test-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.report-pi-legend {
+  font-size: .9rem;
+  color: #333;
+  margin-top: -.8rem;
+  margin-bottom: 1rem;
+}

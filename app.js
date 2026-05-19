@@ -100,6 +100,20 @@ const state = {
 
 const $ = (id) => document.getElementById(id);
 
+function snap5(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 0;
+  return Math.round(n / 5) * 5;
+}
+
+function conditionSymbol(condition) {
+  return { left: "×", right: "○", binaural: "B", soundfield: "S", aided: "A", unaided: "U" }[condition] || "?";
+}
+
+function conditionLabel(condition) {
+  return { left: "Left", right: "Right", binaural: "Binaural", soundfield: "Sound field", aided: "Aided", unaided: "Unaided" }[condition] || condition;
+}
+
 function init() {
   $("sessionDate").value = new Date().toISOString().slice(0,10);
   for (let i = 1; i <= 10; i++) {
@@ -107,6 +121,7 @@ function init() {
     opt.value = String(i);
     opt.textContent = `List ${i}`;
     $("listChoice").appendChild(opt);
+    if ($("queueListNumber")) $("queueListNumber").appendChild(opt.cloneNode(true));
   }
   bindEvents();
   setupCalibrationSlider();
@@ -158,6 +173,7 @@ function bindEvents() {
   };
 
   $("maskLevel").addEventListener("input", () => {
+    $("maskLevel").value = snap5($("maskLevel").value);
     $("maskLevelLive").value = $("maskLevel").value;
     updateLiveMasker();
   });
@@ -166,6 +182,7 @@ function bindEvents() {
     updateLiveMasker();
   });
   $("maskLevelLive").addEventListener("input", () => {
+    $("maskLevelLive").value = snap5($("maskLevelLive").value);
     $("maskLevel").value = $("maskLevelLive").value;
     updateLiveMasker();
   });
@@ -174,10 +191,15 @@ function bindEvents() {
     updateLiveMasker();
   });
 
-  $("addListBtn").onclick = () => addList(Number($("listChoice").value), Number($("listLevel").value));
-  $("addRandomBtn").onclick = () => addRandomList(Number($("listLevel").value));
+  $("addListBtn").onclick = () => addList(Number($("listChoice").value), snap5($("listLevel").value));
+  $("addRandomBtn").onclick = () => addRandomList(snap5($("listLevel").value));
   $("addNRandomBtn").onclick = addNRandomLists;
   $("startBtn").onclick = startTesting;
+
+  if ($("addQueueBtn")) $("addQueueBtn").onclick = () => openQueueDialog(null);
+  if ($("queueSaveBtn")) $("queueSaveBtn").onclick = saveQueueDialog;
+  if ($("queueDeleteBtn")) $("queueDeleteBtn").onclick = deleteQueueDialog;
+  if ($("presentationCondition")) $("presentationCondition").onchange = updatePresentationConditionRouting;
 
   $("playWordBtn").onclick = () => playCurrent(true);
   $("repeatWordBtn").onclick = () => playCurrent(false);
@@ -222,6 +244,7 @@ function readClientForm() {
   state.client = {
     name: $("clientName").value.trim(),
     id: $("clientId").value.trim(),
+    dob: $("clientDob") ? $("clientDob").value : "",
     date: $("sessionDate").value,
     clinician: $("clinician").value.trim(),
     notes: $("sessionNotes").value.trim()
@@ -237,6 +260,7 @@ function loadDraftIntoForm() {
     if (parsed.client) {
       $("clientName").value = parsed.client.name || "";
       $("clientId").value = parsed.client.id || "";
+      if ($("clientDob")) $("clientDob").value = parsed.client.dob || "";
       $("sessionDate").value = parsed.client.date || $("sessionDate").value;
       $("clinician").value = parsed.client.clinician || "";
       $("sessionNotes").value = parsed.client.notes || "";
@@ -543,6 +567,14 @@ function stopCurrentStimulusIfAny() {
   setStimulusIndicator(false);
 }
 
+function updatePresentationConditionRouting() {
+  const c = $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value;
+  if (c === "left") $("stimEar").value = "left";
+  else if (c === "right") $("stimEar").value = "right";
+  else $("stimEar").value = "binaural";
+  if ($("stimEar").onchange) $("stimEar").onchange();
+}
+
 function addList(listNumber, level) {
   if (!listNumber || !level) return;
   state.queue.push({ listNumber, levelDbA: level, status: "queued", id: crypto.randomUUID?.() || String(Date.now()+Math.random()) });
@@ -567,20 +599,89 @@ function addRandomList(level) {
 
 function addNRandomLists() {
   const n = Math.max(1, Math.min(10, Number($("randomCount").value)));
-  const level = Number($("randomLevel").value);
+  const level = snap5($("randomLevel").value);
   for (let i = 0; i < n; i++) addRandomList(level);
 }
 
 function renderQueue() {
   const box = $("queueChips");
+  if (!box) return;
   box.innerHTML = "";
   state.queue.forEach((q, idx) => {
     const chip = document.createElement("span");
-    chip.className = "chip" + (idx === state.currentListIndex ? " current" : "");
-    chip.textContent = `List ${q.listNumber} @ ${q.levelDbA} dB(A) — ${q.status}`;
+    chip.className = "chip queue-chip" + (idx === state.currentListIndex ? " current" : "");
+    chip.draggable = true;
+    chip.dataset.index = String(idx);
+    chip.innerHTML = `List ${q.listNumber} @ ${q.levelDbA} dB(A) — ${q.status} <span class="queue-arrows">↕</span>`;
+    chip.onclick = () => openQueueDialog(idx);
+
+    chip.addEventListener("dragstart", e => {
+      chip.classList.add("dragging");
+      e.dataTransfer.setData("text/plain", String(idx));
+    });
+    chip.addEventListener("dragend", () => chip.classList.remove("dragging"));
+    chip.addEventListener("dragover", e => e.preventDefault());
+    chip.addEventListener("drop", e => {
+      e.preventDefault();
+      const from = Number(e.dataTransfer.getData("text/plain"));
+      moveQueueItem(from, idx);
+    });
+
     box.appendChild(chip);
   });
-  $("progressIndicator").innerHTML = box.innerHTML;
+
+  const progress = $("progressIndicator");
+  if (progress) progress.innerHTML = box.innerHTML;
+}
+
+function openQueueDialog(index) {
+  const dlg = $("queueDialog");
+  if (!dlg) return;
+  const isNew = index === null || index === undefined;
+  $("queueDialogTitle").textContent = isNew ? "Add list" : "Edit list";
+  $("queueEditIndex").value = isNew ? "" : String(index);
+  $("queueListNumber").value = isNew ? String(Number($("listChoice")?.value || 1)) : String(state.queue[index].listNumber);
+  $("queueLevel").value = isNew ? String(snap5($("listLevel")?.value || 60)) : String(state.queue[index].levelDbA);
+  $("queueDeleteBtn").style.visibility = isNew ? "hidden" : "visible";
+  dlg.showModal();
+}
+
+function saveQueueDialog() {
+  const idxRaw = $("queueEditIndex").value;
+  const listNumber = Number($("queueListNumber").value);
+  const levelDbA = snap5($("queueLevel").value);
+  if (idxRaw === "") {
+    addList(listNumber, levelDbA);
+  } else {
+    const idx = Number(idxRaw);
+    if (state.queue[idx]) {
+      state.queue[idx].listNumber = listNumber;
+      state.queue[idx].levelDbA = levelDbA;
+      renderQueue();
+      saveSession();
+    }
+  }
+  $("queueDialog").close();
+}
+
+function deleteQueueDialog() {
+  const idx = Number($("queueEditIndex").value);
+  if (!Number.isFinite(idx) || !state.queue[idx]) return;
+  if (state.queue[idx].status === "in progress" && !confirm("Delete the list currently in progress? Existing trial data already saved will remain in the report.")) return;
+  state.queue.splice(idx, 1);
+  if (state.currentListIndex >= state.queue.length) state.currentListIndex = Math.max(0, state.queue.length - 1);
+  renderQueue();
+  saveSession();
+  $("queueDialog").close();
+}
+
+function moveQueueItem(from, to) {
+  if (from === to || !state.queue[from] || !state.queue[to]) return;
+  const [item] = state.queue.splice(from, 1);
+  state.queue.splice(to, 0, item);
+  if (state.currentListIndex === from) state.currentListIndex = to;
+  renderQueue();
+  saveSession();
 }
 
 function startTesting() {
@@ -625,8 +726,9 @@ function renderTrial() {
   const q = currentQueueItem();
   if (!trial || !q) return;
   const [word, c1, v1, c2, v2, translation] = trial.word;
-  $("currentWord").textContent = word;
-  $("currentMeta").textContent = `List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length} — ${translation}`;
+  $("currentWord").innerHTML = `${word}<span class="kupu-translation">${translation}</span>`;
+  $("currentMeta").textContent = `List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length}`;
+  if ($("phonemeHeading")) $("phonemeHeading").textContent = `Phoneme scoring - ${word}`;
   renderTargetPhonemes([c1,v1,c2,v2]);
   renderAdvanced([c1,v1,c2,v2]);
   renderSelectionColours();
@@ -884,7 +986,9 @@ function nextTrial() {
     client: state.client,
     listNumber: q.listNumber,
     listLevelDbA: q.levelDbA,
+    presentationCondition: $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value,
     stimulusEar: $("stimEar").value,
+    transducer: $("transducer") ? $("transducer").value : "",
     maskerEar: $("maskEar").value,
     maskerLevelDbA: Number($("maskLevel").value),
     trialOrder: trial.order,
@@ -907,6 +1011,7 @@ function nextTrial() {
 function finishList() {
   const q = currentQueueItem();
   q.status = "complete";
+  stopMasker();
   const next = state.queue.findIndex(x => x.status === "queued");
   renderQueue();
   saveSession();
@@ -939,8 +1044,10 @@ function abandonList() {
 function listSummaries() {
   const map = new Map();
   for (const r of state.results) {
-    const key = `${r.listNumber}|${r.listLevelDbA}|${r.stimulusEar}`;
-    if (!map.has(key)) map.set(key, { listNumber: r.listNumber, level: r.listLevelDbA, ear: r.stimulusEar, trials: 0, phonemes: 0 });
+    const condition = r.presentationCondition || r.stimulusEar;
+    const masked = r.maskerEar && r.maskerEar !== "off";
+    const key = `${r.listNumber}|${r.listLevelDbA}|${condition}|${masked}`;
+    if (!map.has(key)) map.set(key, { listNumber: r.listNumber, level: r.listLevelDbA, condition, ear: condition, masked, trials: 0, phonemes: 0 });
     const s = map.get(key);
     s.trials++;
     s.phonemes += Number(r.score || 0);
@@ -979,13 +1086,24 @@ function drawPI() {
   for (const s of listSummaries()) {
     const px = left + (Math.max(0, Math.min(100, s.level)) / 100) * (right - left);
     const py = bottom - (s.percent / 100) * (bottom - top);
+    const condition = s.condition || s.ear;
+    const sym = conditionSymbol(condition);
     ctx.font = "bold 22px system-ui";
-    if (s.ear === "left") {
-      ctx.fillStyle = "#135bd8"; ctx.fillText("×", px - 7, py + 7);
-    } else if (s.ear === "right") {
-      ctx.strokeStyle = "#c52222"; ctx.beginPath(); ctx.arc(px, py, 8, 0, Math.PI*2); ctx.stroke();
+
+    if (condition === "left") {
+      ctx.fillStyle = "#135bd8";
+      ctx.fillText("×", px - 7, py + 7);
+      if (s.masked) ctx.fillText("×", px - 2, py + 7);
+    } else if (condition === "right") {
+      ctx.strokeStyle = "#c52222";
+      ctx.fillStyle = "#c52222";
+      ctx.beginPath();
+      ctx.arc(px, py, 8, 0, Math.PI*2);
+      if (s.masked) ctx.fill();
+      else ctx.stroke();
     } else {
-      ctx.fillStyle = "#111"; ctx.fillText("S", px - 7, py + 7);
+      ctx.fillStyle = "#111";
+      ctx.fillText(sym, px - 7, py + 7);
     }
   }
 }
@@ -1010,9 +1128,9 @@ function downloadJson() {
 }
 
 function downloadTsv() {
-  const cols = ["timestamp","clientName","clientId","listNumber","listLevelDbA","stimulusEar","maskerEar","maskerLevelDbA","trialOrder","presentedWord","targetPhonemes","responsePhonemes","score","percent","comment"];
+  const cols = ["timestamp","clientName","clientId","clientDob","listNumber","listLevelDbA","presentationCondition","stimulusEar","transducer","maskerEar","maskerLevelDbA","trialOrder","presentedWord","targetPhonemes","responsePhonemes","score","percent","comment"];
   const rows = state.results.map(r => [
-    r.timestamp, state.client.name, state.client.id, r.listNumber, r.listLevelDbA, r.stimulusEar, r.maskerEar, r.maskerLevelDbA, r.trialOrder, r.presentedWord,
+    r.timestamp, state.client.name, state.client.id, state.client.dob, r.listNumber, r.listLevelDbA, r.presentationCondition, r.stimulusEar, r.transducer, r.maskerEar, r.maskerLevelDbA, r.trialOrder, r.presentedWord,
     r.targetPhonemes.join(" "), r.responsePhonemes.join(" "), r.score, r.percent, r.comment
   ]);
   const tsv = [cols, ...rows].map(row => row.map(x => String(x ?? "").replace(/\t/g," ").replace(/\n/g," ")).join("\t")).join("\n");
@@ -1032,9 +1150,9 @@ function showReport() {
       return "–";
     }).join(" ");
 
-    return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${r.stimulusEar}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
+    return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${conditionLabel(r.presentationCondition || r.stimulusEar)}</td><td>${r.transducer || ""}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
   }).join("");
-  const summaryRows = summaries.map(s => `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${s.ear}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`).join("");
+  const summaryRows = summaries.map(s => `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${conditionLabel(s.condition || s.ear)}</td><td>${s.masked ? "Yes" : "No"}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`).join("");
   drawPI();
   const piDataUrl = $("piCanvas") ? $("piCanvas").toDataURL("image/png") : "";
   $("reportContent").innerHTML = `
@@ -1043,6 +1161,7 @@ function showReport() {
       <div>
         <p><b>Client:</b> ${state.client.name || ""}</p>
         <p><b>NHI / ID:</b> ${state.client.id || ""}</p>
+        <p><b>Date of birth:</b> ${state.client.dob || ""}</p>
         <p><b>Date:</b> ${state.client.date || ""}</p>
       </div>
       <div>
@@ -1054,9 +1173,9 @@ function showReport() {
     <h2>Performance intensity function</h2>
     ${piDataUrl ? `<img class="report-pi" src="${piDataUrl}" alt="Performance intensity plot">` : ""}
     <h2>Summary</h2>
-    <table class="report-table"><thead><tr><th>List</th><th>Level dB(A)</th><th>Ear</th><th>Trials</th><th>% correct</th></tr></thead><tbody>${summaryRows}</tbody></table>
+    <table class="report-table"><thead><tr><th>List</th><th>Level dB(A)</th><th>Condition</th><th>Masked</th><th>Trials</th><th>% correct</th></tr></thead><tbody>${summaryRows}</tbody></table>
     <h2>Trial data</h2>
-    <table class="report-table"><thead><tr><th>List</th><th>dB(A)</th><th>Ear</th><th>Kupu</th><th>Target</th><th>Response</th><th>Score</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="report-table"><thead><tr><th>List</th><th>dB(A)</th><th>Condition</th><th>Transducer</th><th>Kupu</th><th>Target</th><th>Response</th><th>Score</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>
   `;
   show("screen-report");
 }
