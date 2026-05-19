@@ -70,7 +70,7 @@ const KNOWN_SOUND_FILES = [
 
 const PHONEMES = {
   C: ["p","t","k","m","n","ŋ","w","f","ɾ","h"],
-  V: ["a","e","i","o","u","aː","eː","iː","oː","uː"]
+  V: ["a","aː","e","eː","i","iː","o","oː","u","uː"]
 };
 const V_EQ = { "a":"a","aː":"a","e":"e","eː":"e","i":"i","iː":"i","o":"o","oː":"o","u":"u","uː":"u" };
 
