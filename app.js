@@ -886,6 +886,7 @@ function renderAdvanced(targets) {
         btn.classList.add("selected");
         state.scoringMode = "advanced";
         state.responseSelections[idx] = p === "–" ? "–" : p;
+        state.targetSelections[idx] = false;
         state.trialScore = computeCurrentScore();
         markScoreButton();
         renderSelectionColours();
