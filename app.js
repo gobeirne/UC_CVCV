@@ -91,6 +91,8 @@ const state = {
     maskerGain: null,
     calSource: null,
     calNode: null,
+    testCalNode: null,
+    activeStimuli: [],
     decodedBuffers: {}
   }
 };
@@ -137,7 +139,11 @@ function bindEvents() {
   $("restoreBtn").onclick = restoreSession;
   $("calibrateBtn").onclick = toggleCalibration;
   $("testCalBtn").onclick = testCalibratedSound;
-  $("skipCalBtn").onclick = () => show("screen-setup");
+  $("skipCalBtn").onclick = () => {
+    stopCalibrationSound();
+    stopTestCalibratedSound();
+    show("screen-setup");
+  };
   $("outputLevel").addEventListener("input", updateOutputLevelFromSlider);
   $("outputLevel").addEventListener("change", updateOutputLevelFromSlider);
   $("outputLevel").addEventListener("touchend", updateOutputLevelFromSlider);
@@ -197,7 +203,7 @@ function bindEvents() {
       markScoreButton();
       renderSelectionColours();
     }
-    if (e.code === "Space" && !["INPUT","TEXTAREA","SELECT","BUTTON"].includes(document.activeElement.tagName)) {
+    if (e.code === "Space" && !["INPUT","TEXTAREA","SELECT"].includes(document.activeElement.tagName)) {
       e.preventDefault();
       playCurrent(true);
     }
@@ -305,7 +311,14 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
   gain.gain.value = gainForLevel(levelDbA);
 
   source.connect(gain).connect(pan).connect(ctx.destination);
-  return { el, source, gain, pan };
+  const node = { el, source, gain, pan, loop };
+  if (!loop) {
+    state.audio.activeStimuli.push(node);
+    el.addEventListener("ended", () => {
+      state.audio.activeStimuli = state.audio.activeStimuli.filter(x => x !== node);
+    }, { once: true });
+  }
+  return node;
 }
 
 function gainForLevel(levelDbA) {
@@ -441,6 +454,7 @@ async function toggleCalibration() {
   }
 
   stopCurrentStimulusIfAny();
+  stopTestCalibratedSound();
   ensureAudio();
   let buffer;
   try {
@@ -463,7 +477,15 @@ async function toggleCalibration() {
 
 async function testCalibratedSound() {
   if (!state.calibration.isCalibrated) return;
+
+  if (state.audio.testCalNode) {
+    stopTestCalibratedSound();
+    return;
+  }
+
   stopCurrentStimulusIfAny();
+  stopCalibrationSound();
+
   let buffer;
   try {
     buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
@@ -471,20 +493,41 @@ async function testCalibratedSound() {
     alert("No calibration sound file found.");
     return;
   }
+
   const source = state.audio.ctx.createBufferSource();
   const gain = state.audio.ctx.createGain();
   source.buffer = buffer;
+  source.loop = true;
   gain.gain.value = gainForLevel(state.calibration.currentSliderDb);
   source.connect(gain).connect(state.audio.ctx.destination);
   source.start();
-  state.audio.calNode = source;
+
+  state.audio.testCalNode = source;
+  $("testCalBtn").textContent = "Stop";
   source.onended = () => {
-    if (state.audio.calNode === source) state.audio.calNode = null;
+    if (state.audio.testCalNode === source) {
+      state.audio.testCalNode = null;
+      $("testCalBtn").textContent = "Test Calibrated Sound";
+    }
   };
 }
 
+function stopTestCalibratedSound() {
+  if (state.audio.testCalNode) {
+    try { state.audio.testCalNode.stop(); } catch {}
+    state.audio.testCalNode = null;
+  }
+  if ($("testCalBtn")) $("testCalBtn").textContent = "Test Calibrated Sound";
+}
+
 function stopCurrentStimulusIfAny() {
-  // Placeholder hook: media-element stimulus playback is short-lived, masker is intentionally independent.
+  for (const node of state.audio.activeStimuli || []) {
+    try {
+      node.el.pause();
+      node.el.currentTime = 0;
+    } catch {}
+  }
+  state.audio.activeStimuli = [];
 }
 
 function addList(listNumber, level) {
@@ -495,9 +538,16 @@ function addList(listNumber, level) {
 }
 
 function addRandomList(level) {
-  const used = new Set(state.queue.map(q => q.listNumber));
-  const available = Object.keys(WORD_LISTS).map(Number).filter(n => !used.has(n));
-  const pool = available.length ? available : Object.keys(WORD_LISTS).map(Number);
+  const allLists = Object.keys(WORD_LISTS).map(Number);
+  let pool = allLists;
+
+  // Do not duplicate a list while the queue contains fewer than 10 list entries.
+  // Once the clinician adds more than 10 entries, repeats are unavoidable and allowed.
+  if (state.queue.length < allLists.length) {
+    const used = new Set(state.queue.map(q => q.listNumber));
+    pool = allLists.filter(n => !used.has(n));
+  }
+
   const n = pool[Math.floor(Math.random() * pool.length)];
   addList(n, level);
 }
@@ -566,6 +616,15 @@ function renderTrial() {
   renderAdvanced([c1,v1,c2,v2]);
   renderSelectionColours();
   renderQueue();
+  scheduleAutoplay();
+}
+
+function scheduleAutoplay() {
+  // Let the UI paint first, then play the carrier phrase + kupu.
+  // Browsers may block this until the first user gesture, but after Start/Next it should work.
+  setTimeout(() => {
+    if ($("screen-test").classList.contains("active")) playCurrent(true);
+  }, 250);
 }
 
 function renderTargetPhonemes(phonemes) {
@@ -645,8 +704,13 @@ function renderSelectionColours() {
   const targets = trial.word.slice(1,5);
 
   document.querySelectorAll(".phoneme-target").forEach((el, idx) => {
-    el.classList.toggle("selected", !!state.targetSelections[idx]);
-    el.classList.toggle("correct-selected", !!state.targetSelections[idx]);
+    const advanced = state.responseSelections[idx];
+    const topSelected = !!state.targetSelections[idx];
+    const advancedChosen = !!advanced;
+
+    el.classList.toggle("selected", topSelected || advancedChosen);
+    el.classList.toggle("correct-selected", topSelected || (advancedChosen && equivalent(targets[idx], advanced)));
+    el.classList.toggle("incorrect-selected", advancedChosen && !equivalent(targets[idx], advanced));
   });
 
   document.querySelectorAll(".advanced-col").forEach((col, idx) => {
@@ -679,6 +743,7 @@ function clearScoring() {
 }
 
 async function playCurrent(withCarrier) {
+  stopCurrentStimulusIfAny();
   const trial = currentTrial();
   const q = currentQueueItem();
   if (!trial || !q) return;

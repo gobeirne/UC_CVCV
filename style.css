@@ -417,3 +417,30 @@ menu {
   margin: 1rem 0 1.5rem;
   max-width: 520px;
 }
+
+
+.score-buttons {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  gap: .45rem;
+}
+
+.score-buttons button {
+  min-width: 0;
+  padding-left: .35rem;
+  padding-right: .35rem;
+}
+
+@media (max-width: 460px) {
+  .score-buttons {
+    gap: .3rem;
+  }
+  .score-buttons button {
+    font-size: 1.45rem;
+    padding: .75rem .2rem;
+  }
+}
+
+.phoneme-target.incorrect-selected {
+  border-color: #b91c1c !important;
+  background: #fef2f2 !important;
+}
