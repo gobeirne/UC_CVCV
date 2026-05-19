@@ -81,6 +81,7 @@ const state = {
   currentListIndex: -1,
   currentTrialIndex: 0,
   currentTrials: [],
+  firstTrialMaskerPrimed: false,
   results: [],
   trialScore: null,
   targetSelections: [false,false,false,false],
@@ -312,11 +313,22 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
 
   source.connect(gain).connect(pan).connect(ctx.destination);
   const node = { el, source, gain, pan, loop };
+
   if (!loop) {
     state.audio.activeStimuli.push(node);
+    setStimulusIndicator(true);
     el.addEventListener("ended", () => {
       state.audio.activeStimuli = state.audio.activeStimuli.filter(x => x !== node);
+      if (!state.audio.activeStimuli.length) setStimulusIndicator(false);
     }, { once: true });
+  } else {
+    // Fallback only: iOS can gap HTMLAudioElement loops.
+    // Main masker path uses AudioBufferSourceNode below.
+    el.addEventListener("timeupdate", () => {
+      if (el.duration && el.duration - el.currentTime < 0.12) {
+        try { el.currentTime = 0; el.play(); } catch {}
+      }
+    });
   }
   return node;
 }
@@ -528,6 +540,7 @@ function stopCurrentStimulusIfAny() {
     } catch {}
   }
   state.audio.activeStimuli = [];
+  setStimulusIndicator(false);
 }
 
 function addList(listNumber, level) {
@@ -576,6 +589,7 @@ function startTesting() {
   state.currentListIndex = state.queue.findIndex(q => q.status === "queued");
   if (state.currentListIndex < 0) state.currentListIndex = 0;
   syncMaskerControls();
+  state.firstTrialMaskerPrimed = false;
   beginCurrentList();
   show("screen-test");
 }
@@ -593,6 +607,7 @@ function beginCurrentList() {
   const q = state.queue[state.currentListIndex];
   if (!q) return showReport();
   q.status = "in progress";
+  state.firstTrialMaskerPrimed = false;
   state.currentTrials = shuffle(WORD_LISTS[q.listNumber]).map((w, i) => ({ order: i + 1, word: w }));
   state.currentTrialIndex = 0;
   renderQueue();
@@ -621,10 +636,15 @@ function renderTrial() {
 
 function scheduleAutoplay() {
   // Let the UI paint first, then play the carrier phrase + kupu.
-  // Browsers may block this until the first user gesture, but after Start/Next it should work.
+  // For the first kupu in a list, if masking is active, give the masker at least 3 seconds first.
+  const maskerOn = $("maskEar").value !== "off";
+  const needsMaskerLeadIn = maskerOn && !state.firstTrialMaskerPrimed && state.currentTrialIndex === 0;
+  const delay = needsMaskerLeadIn ? 3100 : 250;
+  if (needsMaskerLeadIn) state.firstTrialMaskerPrimed = true;
+
   setTimeout(() => {
     if ($("screen-test").classList.contains("active")) playCurrent(true);
-  }, 250);
+  }, delay);
 }
 
 function renderTargetPhonemes(phonemes) {
@@ -762,6 +782,22 @@ async function playCurrent(withCarrier) {
   }
 }
 
+function setMaskerIndicator(isOn) {
+  const el = $("maskerStatus");
+  if (!el) return;
+  el.classList.toggle("on", !!isOn);
+  el.classList.toggle("off", !isOn);
+  el.textContent = isOn ? "Masker playing" : "Masker off";
+}
+
+function setStimulusIndicator(isOn) {
+  const el = $("stimulusStatus");
+  if (!el) return;
+  el.classList.toggle("on", !!isOn);
+  el.classList.toggle("off", !isOn);
+  el.textContent = isOn ? "Kupu playing" : "Kupu idle";
+}
+
 function syncMaskerControls() {
   if ($("maskLevelLive")) $("maskLevelLive").value = $("maskLevel").value;
   if ($("maskEarLive")) $("maskEarLive").value = $("maskEar").value;
@@ -773,6 +809,7 @@ function updateLiveMasker() {
     state.audio.masker.gain.gain.value = gainForLevel(Number($("maskLevel").value));
     state.audio.masker.pan.pan.value = $("maskEar").value === "left" ? -1 : $("maskEar").value === "right" ? 1 : 0;
     if ($("maskEar").value === "off") stopMasker();
+    else setMaskerIndicator(true);
   } else if ($("maskEar").value !== "off" && $("screen-test").classList.contains("active")) {
     startMasker();
   }
@@ -787,20 +824,47 @@ async function startMaskerIfNeeded() {
 async function startMasker() {
   if (state.audio.masker) return;
   try {
-    state.audio.masker = await playFirstAvailable(["noise","masking"], $("maskEar").value, Number($("maskLevel").value), true);
+    const ctx = ensureAudio();
+    const buffer = await decodeFirstAvailable(["noise","masking"]);
+    const source = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    const pan = ctx.createStereoPanner();
+
+    source.buffer = buffer;
+    source.loop = true;
+    gain.gain.value = gainForLevel(Number($("maskLevel").value));
+    pan.pan.value = $("maskEar").value === "left" ? -1 : $("maskEar").value === "right" ? 1 : 0;
+
+    source.connect(gain).connect(pan).connect(ctx.destination);
+    source.start();
+
+    state.audio.masker = { bufferSource: source, gain, pan, isBufferLoop: true };
     $("toggleMaskBtn").textContent = "Stop masker";
+    setMaskerIndicator(true);
   } catch {
-    $("toggleMaskBtn").textContent = "Start masker";
+    try {
+      state.audio.masker = await playFirstAvailable(["noise","masking"], $("maskEar").value, Number($("maskLevel").value), true);
+      $("toggleMaskBtn").textContent = "Stop masker";
+      setMaskerIndicator(true);
+    } catch {
+      $("toggleMaskBtn").textContent = "Start masker";
+      setMaskerIndicator(false);
+    }
   }
 }
 
 function stopMasker() {
   if (state.audio.masker) {
-    state.audio.masker.el.pause();
-    state.audio.masker.el.currentTime = 0;
+    if (state.audio.masker.isBufferLoop) {
+      try { state.audio.masker.bufferSource.stop(); } catch {}
+    } else if (state.audio.masker.el) {
+      state.audio.masker.el.pause();
+      state.audio.masker.el.currentTime = 0;
+    }
     state.audio.masker = null;
   }
   $("toggleMaskBtn").textContent = "Start masker";
+  setMaskerIndicator(false);
 }
 
 function toggleMasker() {

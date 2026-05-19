@@ -444,3 +444,110 @@ menu {
   border-color: #b91c1c !important;
   background: #fef2f2 !important;
 }
+
+
+.playback-status {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+  margin: .35rem 0 .65rem;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .35rem .65rem;
+  border-radius: 999px;
+  font-weight: 800;
+  border: 1px solid var(--line);
+  background: #f1f1f1;
+  color: #555;
+}
+
+.status-pill::before {
+  content: "";
+  width: .65rem;
+  height: .65rem;
+  border-radius: 50%;
+  background: #999;
+}
+
+.status-pill.on {
+  background: #ecfdf3;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.status-pill.on::before {
+  background: #16a34a;
+  box-shadow: 0 0 0 .18rem rgba(22, 163, 74, .18);
+}
+
+.sticky-next {
+  position: sticky;
+  bottom: .35rem;
+  z-index: 3;
+  background: rgba(255,255,255,.95);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: .45rem;
+  box-shadow: 0 8px 20px rgba(0,0,0,.12);
+}
+
+.sticky-next button {
+  flex: 1;
+}
+
+#nextTrialBtn {
+  font-size: 1.15rem;
+}
+
+#currentWord {
+  font-size: clamp(1.9rem, 5vw, 3.4rem);
+}
+
+.phoneme-target {
+  min-height: 3.1rem;
+  font-size: 1.65rem;
+}
+
+details summary {
+  cursor: pointer;
+  font-weight: 800;
+  margin: .25rem 0;
+}
+
+.card h3 {
+  margin-bottom: .35rem;
+}
+
+.masker-live {
+  margin: .55rem 0;
+  padding: .55rem;
+}
+
+.actions.wrap {
+  margin-top: .45rem;
+}
+
+.score-buttons {
+  margin-bottom: .55rem;
+}
+
+@media (max-height: 760px) and (min-width: 760px) {
+  .uc-header {
+    padding-top: .45rem;
+    padding-bottom: .45rem;
+  }
+  .card {
+    padding: .8rem;
+  }
+  .advanced-grid {
+    gap: .3rem;
+  }
+  .phoneme-option {
+    min-height: 1.75rem;
+    margin: .14rem 0;
+  }
+}

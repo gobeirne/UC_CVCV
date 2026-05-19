@@ -128,6 +128,11 @@
 
             <div id="progressIndicator" class="chips"></div>
 
+            <div class="playback-status">
+              <span id="maskerStatus" class="status-pill off">Masker off</span>
+              <span id="stimulusStatus" class="status-pill off">Kupu idle</span>
+            </div>
+
             <div class="masker-live">
               <label>Masker level, dB(A)
                 <input id="maskLevelLive" type="number" step="1" value="40">
@@ -167,7 +172,7 @@
               <input id="trialComment" placeholder="Optional">
             </label>
 
-            <div class="actions">
+            <div class="sticky-next actions">
               <button id="clearScoreBtn" type="button" class="secondary">Clear</button>
               <button id="nextTrialBtn" type="button">Next</button>
             </div>
