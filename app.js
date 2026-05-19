@@ -81,6 +81,7 @@ const state = {
   currentListIndex: -1,
   currentTrialIndex: 0,
   currentTrials: [],
+  currentResultIndexByTrial: {},
   firstTrialMaskerPrimed: false,
   results: [],
   trialScore: null,
@@ -127,6 +128,7 @@ function init() {
   setupCalibrationSlider();
   drawPI();
   loadDraftIntoForm();
+  if ($("maskingEnabled")) updateMaskingEnabled();
   offerStoredCalibration();
 }
 
@@ -166,9 +168,13 @@ function bindEvents() {
 
   $("stimEar").onchange = () => {
     const ear = $("stimEar").value;
-    if (ear === "left") $("maskEar").value = "right";
-    if (ear === "right") $("maskEar").value = "left";
-    if (ear === "binaural") $("maskEar").value = "off";
+    if ($("maskingEnabled") && $("maskingEnabled").value === "off") {
+      $("maskEar").value = "off";
+    } else {
+      if (ear === "left") $("maskEar").value = "right";
+      if (ear === "right") $("maskEar").value = "left";
+      if (ear === "binaural") $("maskEar").value = "binaural";
+    }
     syncMaskerControls();
   };
 
@@ -200,6 +206,9 @@ function bindEvents() {
   if ($("queueSaveBtn")) $("queueSaveBtn").onclick = saveQueueDialog;
   if ($("queueDeleteBtn")) $("queueDeleteBtn").onclick = deleteQueueDialog;
   if ($("presentationCondition")) $("presentationCondition").onchange = updatePresentationConditionRouting;
+  if ($("maskingEnabled")) $("maskingEnabled").onchange = updateMaskingEnabled;
+  if ($("conditionSaveBtn")) $("conditionSaveBtn").onclick = saveConditionDialog;
+  if ($("trialEditSaveBtn")) $("trialEditSaveBtn").onclick = saveTrialEditDialog;
 
   $("playWordBtn").onclick = () => playCurrent(true);
   $("repeatWordBtn").onclick = () => playCurrent(false);
@@ -213,6 +222,7 @@ function bindEvents() {
 
   $("downloadJsonBtn").onclick = downloadJson;
   $("downloadTsvBtn").onclick = downloadTsv;
+  if ($("copyTsvBtn")) $("copyTsvBtn").onclick = copyTsv;
   $("reportBtn").onclick = showReport;
   $("backToTestBtn").onclick = () => show("screen-test");
   $("printBtn").onclick = () => window.print();
@@ -567,6 +577,60 @@ function stopCurrentStimulusIfAny() {
   setStimulusIndicator(false);
 }
 
+function updateMaskingEnabled() {
+  const enabled = $("maskingEnabled") && $("maskingEnabled").value === "on";
+  $("maskEar").disabled = !enabled;
+  $("maskLevel").disabled = !enabled;
+  if (!enabled) {
+    $("maskEar").value = "off";
+    if ($("maskEarLive")) $("maskEarLive").value = "off";
+    stopMasker();
+  } else if ($("maskEar").value === "off") {
+    const stim = $("stimEar").value;
+    $("maskEar").value = stim === "left" ? "right" : stim === "right" ? "left" : "binaural";
+  }
+  syncMaskerControls();
+}
+
+function openConditionDialog() {
+  if (!$("conditionDialog")) return;
+  $("conditionEditSelect").value = $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value;
+  $("conditionDialog").showModal();
+}
+
+function saveConditionDialog() {
+  if ($("presentationCondition")) {
+    $("presentationCondition").value = $("conditionEditSelect").value;
+    updatePresentationConditionRouting();
+    renderQueue();
+    drawPI();
+    saveSession();
+  }
+  $("conditionDialog").close();
+}
+
+function openTrialEdit(resultIndex) {
+  const r = state.results[resultIndex];
+  if (!r || !$("trialEditDialog")) return;
+  $("trialEditResultIndex").value = String(resultIndex);
+  $("trialEditTitle").textContent = `Edit ${r.presentedWord}`;
+  $("trialEditScore").value = String(r.score ?? 0);
+  $("trialEditComment").value = r.comment || "";
+  $("trialEditDialog").showModal();
+}
+
+function saveTrialEditDialog() {
+  const idx = Number($("trialEditResultIndex").value);
+  if (!Number.isFinite(idx) || !state.results[idx]) return;
+  state.results[idx].score = Number($("trialEditScore").value);
+  state.results[idx].percent = state.results[idx].score * 25;
+  state.results[idx].comment = $("trialEditComment").value.trim();
+  saveSession();
+  drawPI();
+  renderTrialNavigator();
+  $("trialEditDialog").close();
+}
+
 function updatePresentationConditionRouting() {
   const c = $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value;
   if (c === "left") $("stimEar").value = "left";
@@ -710,6 +774,7 @@ function beginCurrentList() {
   q.status = "in progress";
   state.firstTrialMaskerPrimed = false;
   state.currentTrials = shuffle(WORD_LISTS[q.listNumber]).map((w, i) => ({ order: i + 1, word: w }));
+  state.currentResultIndexByTrial = {};
   state.currentTrialIndex = 0;
   renderQueue();
   renderTrial();
@@ -727,12 +792,16 @@ function renderTrial() {
   if (!trial || !q) return;
   const [word, c1, v1, c2, v2, translation] = trial.word;
   $("currentWord").innerHTML = `${word}<span class="kupu-translation">${translation}</span>`;
-  $("currentMeta").textContent = `List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length}`;
+  const c = $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value;
+  $("currentMeta").innerHTML = `List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length} — <span class="condition-chip" title="Click to change condition">${conditionLabel(c)}</span>`;
+  const conditionChip = $("currentMeta").querySelector(".condition-chip");
+  if (conditionChip) conditionChip.onclick = openConditionDialog;
   if ($("phonemeHeading")) $("phonemeHeading").textContent = `Phoneme scoring - ${word}`;
   renderTargetPhonemes([c1,v1,c2,v2]);
   renderAdvanced([c1,v1,c2,v2]);
   renderSelectionColours();
   renderQueue();
+  renderTrialNavigator();
   scheduleAutoplay();
 }
 
@@ -747,6 +816,31 @@ function scheduleAutoplay() {
   setTimeout(() => {
     if ($("screen-test").classList.contains("active")) playCurrent(true);
   }, delay);
+}
+
+function renderTrialNavigator() {
+  const box = $("trialNavigator");
+  if (!box) return;
+  box.innerHTML = "";
+  if (!state.currentTrials || !state.currentTrials.length) return;
+
+  state.currentTrials.forEach((trial, idx) => {
+    const resultIdx = state.currentResultIndexByTrial?.[idx];
+    const result = Number.isFinite(resultIdx) ? state.results[resultIdx] : null;
+    const item = document.createElement("div");
+    item.className = "trial-nav-item" + (idx === state.currentTrialIndex ? " current" : "") + (result ? " done" : "");
+    const scoreText = result ? `${result.score}/4` : idx === state.currentTrialIndex ? "now" : "—";
+    const scoreClass = result ? (result.score >= 3 ? "good" : "bad") : "";
+    item.innerHTML = `<span>${idx + 1}</span><span>${trial.word[0]}</span><span class="trial-nav-score ${scoreClass}">${scoreText}</span>`;
+    item.onclick = () => {
+      if (result) openTrialEdit(resultIdx);
+      else if (idx >= state.currentTrialIndex) {
+        state.currentTrialIndex = idx;
+        renderTrial();
+      }
+    };
+    box.appendChild(item);
+  });
 }
 
 function renderTargetPhonemes(phonemes) {
@@ -981,7 +1075,7 @@ function nextTrial() {
   if (!trial || !q) return;
   const targets = trial.word.slice(1,5);
   const score = state.trialScore ?? computeCurrentScore();
-  state.results.push({
+  const resultPayload = {
     timestamp: new Date().toISOString(),
     client: state.client,
     listNumber: q.listNumber,
@@ -998,8 +1092,17 @@ function nextTrial() {
     selectedTargetCorrectness: [...state.targetSelections],
     score,
     percent: score * 25,
+    maskerLevelReport: $("maskEar").value === "off" ? "none" : Number($("maskLevel").value),
     comment: $("trialComment").value.trim()
-  });
+  };
+
+  const existingIdx = state.currentResultIndexByTrial[state.currentTrialIndex];
+  if (Number.isFinite(existingIdx)) {
+    state.results[existingIdx] = resultPayload;
+  } else {
+    state.results.push(resultPayload);
+    state.currentResultIndexByTrial[state.currentTrialIndex] = state.results.length - 1;
+  }
 
   state.currentTrialIndex++;
   if (state.currentTrialIndex >= state.currentTrials.length) finishList();
@@ -1123,18 +1226,56 @@ function safeName() {
 
 function downloadJson() {
   readClientForm();
-  const payload = { exportedAt: new Date().toISOString(), app: "UC Te reo Māori CVCV Speech Audiometry", client: state.client, calibration: state.calibration, queue: state.queue, results: state.results, summaries: listSummaries() };
+  const payload = { exportedAt: new Date().toISOString(), app: "UC Te reo Māori CVCV Speech Audiometry", client: state.client, setup: { presentationCondition: $("presentationCondition") ? $("presentationCondition").value : "", stimulusRouting: $("stimEar") ? $("stimEar").value : "", transducer: $("transducer") ? $("transducer").value : "", maskingAtExport: $("maskEar") && $("maskEar").value !== "off", maskerEar: $("maskEar") ? $("maskEar").value : "", maskerLevelDbA: $("maskLevel") ? $("maskLevel").value : "" }, calibration: state.calibration, queue: state.queue, results: state.results, summaries: listSummaries() };
   download(`${safeName()}_te_reo_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
 }
 
-function downloadTsv() {
+function buildTsv() {
+  readClientForm();
+  const headerRows = [
+    ["Client name", state.client.name || ""],
+    ["Client ID", state.client.id || ""],
+    ["Date of birth", state.client.dob || ""],
+    ["Session date", state.client.date || ""],
+    ["Clinician", state.client.clinician || ""],
+    ["Notes", state.client.notes || ""],
+    ["Calibration dB(A)", state.calibration?.isCalibrated ? state.calibration.measuredDbA : "not set"],
+    ["Default presentation condition", $("presentationCondition") ? conditionLabel($("presentationCondition").value) : ""],
+    ["Stimulus routing", $("stimEar") ? $("stimEar").value : ""],
+    ["Transducer", $("transducer") ? $("transducer").value : ""],
+    ["Masking enabled at export", $("maskEar") && $("maskEar").value !== "off" ? "Yes" : "No"],
+    []
+  ];
+
   const cols = ["timestamp","clientName","clientId","clientDob","listNumber","listLevelDbA","presentationCondition","stimulusEar","transducer","maskerEar","maskerLevelDbA","trialOrder","presentedWord","targetPhonemes","responsePhonemes","score","percent","comment"];
   const rows = state.results.map(r => [
-    r.timestamp, state.client.name, state.client.id, state.client.dob, r.listNumber, r.listLevelDbA, r.presentationCondition, r.stimulusEar, r.transducer, r.maskerEar, r.maskerLevelDbA, r.trialOrder, r.presentedWord,
+    r.timestamp, state.client.name, state.client.id, state.client.dob, r.listNumber, r.listLevelDbA, r.presentationCondition, r.stimulusEar, r.transducer, r.maskerEar, r.maskerLevelReport ?? r.maskerLevelDbA ?? "none", r.trialOrder, r.presentedWord,
     r.targetPhonemes.join(" "), r.responsePhonemes.join(" "), r.score, r.percent, r.comment
   ]);
-  const tsv = [cols, ...rows].map(row => row.map(x => String(x ?? "").replace(/\t/g," ").replace(/\n/g," ")).join("\t")).join("\n");
-  download(`${safeName()}_te_reo_speech_audiometry.tsv`, "text/tab-separated-values", tsv);
+
+  return [...headerRows, cols, ...rows]
+    .map(row => row.map(x => String(x ?? "").replace(/\t/g," ").replace(/\n/g," ")).join("\t"))
+    .join("\n");
+}
+
+function downloadTsv() {
+  download(`${safeName()}_te_reo_speech_audiometry.tsv`, "text/tab-separated-values", buildTsv());
+}
+
+async function copyTsv() {
+  const tsv = buildTsv();
+  try {
+    await navigator.clipboard.writeText(tsv);
+    alert("TSV copied to clipboard.");
+  } catch {
+    const ta = document.createElement("textarea");
+    ta.value = tsv;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+    alert("TSV copied to clipboard.");
+  }
 }
 
 function showReport() {
@@ -1150,7 +1291,7 @@ function showReport() {
       return "–";
     }).join(" ");
 
-    return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${conditionLabel(r.presentationCondition || r.stimulusEar)}</td><td>${r.transducer || ""}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
+    return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${conditionLabel(r.presentationCondition || r.stimulusEar)}</td><td>${r.transducer || ""}</td><td>${r.maskerLevelReport ?? r.maskerLevelDbA ?? "none"}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
   }).join("");
   const summaryRows = summaries.map(s => `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${conditionLabel(s.condition || s.ear)}</td><td>${s.masked ? "Yes" : "No"}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`).join("");
   drawPI();
@@ -1175,7 +1316,7 @@ function showReport() {
     <h2>Summary</h2>
     <table class="report-table"><thead><tr><th>List</th><th>Level dB(A)</th><th>Condition</th><th>Masked</th><th>Trials</th><th>% correct</th></tr></thead><tbody>${summaryRows}</tbody></table>
     <h2>Trial data</h2>
-    <table class="report-table"><thead><tr><th>List</th><th>dB(A)</th><th>Condition</th><th>Transducer</th><th>Kupu</th><th>Target</th><th>Response</th><th>Score</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>
+    <table class="report-table"><thead><tr><th>List</th><th>dB(A)</th><th>Condition</th><th>Transducer</th><th>Masker dB(A)</th><th>Kupu</th><th>Target</th><th>Response</th><th>Score</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>
   `;
   show("screen-report");
 }
