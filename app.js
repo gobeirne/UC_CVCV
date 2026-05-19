@@ -85,6 +85,7 @@ const state = {
   firstTrialMaskerPrimed: false,
   results: [],
   trialScore: null,
+  scoringMode: "none",
   targetSelections: [false,false,false,false],
   responseSelections: [null,null,null,null],
   audio: {
@@ -142,8 +143,9 @@ function setupFastScoreButtons() {
     btn.dataset.score = String(i);
     btn.textContent = String(i);
     btn.onclick = () => {
+      state.scoringMode = "fast";
       state.trialScore = i;
-      state.targetSelections = [0,1,2,3].map(idx => idx < i);
+      state.targetSelections = [false,false,false,false];
       state.responseSelections = [null,null,null,null];
       markScoreButton();
       renderSelectionColours();
@@ -230,8 +232,9 @@ function bindEvents() {
   document.addEventListener("keydown", (e) => {
     if (!$("screen-test").classList.contains("active")) return;
     if (["0","1","2","3","4"].includes(e.key)) {
+      state.scoringMode = "fast";
       state.trialScore = Number(e.key);
-      state.targetSelections = [0,1,2,3].map(idx => idx < state.trialScore);
+      state.targetSelections = [false,false,false,false];
       state.responseSelections = [null,null,null,null];
       markScoreButton();
       renderSelectionColours();
@@ -623,6 +626,9 @@ function saveTrialEditDialog() {
   const idx = Number($("trialEditResultIndex").value);
   if (!Number.isFinite(idx) || !state.results[idx]) return;
   state.results[idx].score = Number($("trialEditScore").value);
+  state.results[idx].scoringMode = "edited-numeric";
+  state.results[idx].responsePhonemes = [null,null,null,null];
+  state.results[idx].selectedTargetCorrectness = [false,false,false,false];
   state.results[idx].percent = state.results[idx].score * 25;
   state.results[idx].comment = $("trialEditComment").value.trim();
   saveSession();
@@ -851,6 +857,7 @@ function renderTargetPhonemes(phonemes) {
     div.className = "phoneme-target";
     div.textContent = p;
     div.onclick = () => {
+      state.scoringMode = "phoneme";
       state.targetSelections[idx] = !state.targetSelections[idx];
       div.classList.toggle("selected", state.targetSelections[idx]);
       state.trialScore = computeCurrentScore();
@@ -877,6 +884,7 @@ function renderAdvanced(targets) {
       btn.onclick = () => {
         [...col.querySelectorAll(".phoneme-option")].forEach(x => x.classList.remove("selected", "correct-selected", "incorrect-selected"));
         btn.classList.add("selected");
+        state.scoringMode = "advanced";
         state.responseSelections[idx] = p === "–" ? "–" : p;
         state.trialScore = computeCurrentScore();
         markScoreButton();
@@ -899,6 +907,8 @@ function computeAdvancedScore(targets, responses) {
 }
 
 function computeCurrentScore() {
+  if (state.scoringMode === "fast") return Number(state.trialScore ?? 0);
+
   const trial = currentTrial();
   if (!trial) return 0;
   const targets = trial.word.slice(1,5);
@@ -918,11 +928,19 @@ function renderSelectionColours() {
   const trial = currentTrial();
   if (!trial) return;
   const targets = trial.word.slice(1,5);
+  const fastAllCorrect = state.scoringMode === "fast" && Number(state.trialScore) === 4;
 
   document.querySelectorAll(".phoneme-target").forEach((el, idx) => {
     const advanced = state.responseSelections[idx];
     const topSelected = !!state.targetSelections[idx];
     const advancedChosen = !!advanced;
+
+    if (state.scoringMode === "fast") {
+      el.classList.toggle("selected", fastAllCorrect);
+      el.classList.toggle("correct-selected", fastAllCorrect);
+      el.classList.toggle("incorrect-selected", false);
+      return;
+    }
 
     el.classList.toggle("selected", topSelected || advancedChosen);
     el.classList.toggle("correct-selected", topSelected || (advancedChosen && equivalent(targets[idx], advanced)));
@@ -936,10 +954,11 @@ function renderSelectionColours() {
     col.querySelectorAll(".phoneme-option").forEach(btn => {
       const p = btn.textContent;
       const isChosen = explicitResponse === p;
-      const isTopSelected = !explicitResponse && state.targetSelections[idx] && equivalent(target, p);
+      const isTopSelected = state.scoringMode !== "fast" && !explicitResponse && state.targetSelections[idx] && equivalent(target, p);
+      const fastCorrect = fastAllCorrect && equivalent(target, p);
 
       btn.classList.toggle("selected", isChosen);
-      btn.classList.toggle("correct-selected", (isChosen && equivalent(target, p)) || isTopSelected);
+      btn.classList.toggle("correct-selected", (isChosen && equivalent(target, p)) || isTopSelected || fastCorrect);
       btn.classList.toggle("incorrect-selected", isChosen && !equivalent(target, p));
     });
   });
@@ -953,6 +972,7 @@ function markScoreButton() {
 
 function clearScoring() {
   state.trialScore = null;
+  state.scoringMode = "none";
   state.targetSelections = [false,false,false,false];
   state.responseSelections = [null,null,null,null];
   $("trialComment").value = "";
@@ -1090,8 +1110,9 @@ function nextTrial() {
     trialOrder: trial.order,
     presentedWord: trial.word[0],
     targetPhonemes: targets,
-    responsePhonemes: [...state.responseSelections],
-    selectedTargetCorrectness: [...state.targetSelections],
+    scoringMode: state.scoringMode,
+    responsePhonemes: state.scoringMode === "fast" ? [null,null,null,null] : [...state.responseSelections],
+    selectedTargetCorrectness: state.scoringMode === "fast" ? [false,false,false,false] : [...state.targetSelections],
     score,
     percent: score * 25,
     maskerLevelReport: $("maskEar").value === "off" ? "none" : Number($("maskLevel").value),
@@ -1249,10 +1270,10 @@ function buildTsv() {
     []
   ];
 
-  const cols = ["timestamp","clientName","clientId","clientDob","listNumber","listLevelDbA","presentationCondition","stimulusEar","transducer","maskerEar","maskerLevelDbA","trialOrder","presentedWord","targetPhonemes","responsePhonemes","score","percent","comment"];
+  const cols = ["timestamp","clientName","clientId","clientDob","listNumber","listLevelDbA","presentationCondition","stimulusEar","transducer","maskerEar","maskerLevelDbA","trialOrder","presentedWord","targetPhonemes","scoringMode","responsePhonemes","score","percent","comment"];
   const rows = state.results.map(r => [
     r.timestamp, state.client.name, state.client.id, state.client.dob, r.listNumber, r.listLevelDbA, r.presentationCondition, r.stimulusEar, r.transducer, r.maskerEar, r.maskerLevelReport ?? r.maskerLevelDbA ?? "none", r.trialOrder, r.presentedWord,
-    r.targetPhonemes.join(" "), r.responsePhonemes.join(" "), r.score, r.percent, r.comment
+    r.targetPhonemes.join(" "), r.scoringMode || "", r.scoringMode === "fast" ? (Number(r.score) === 4 ? r.targetPhonemes.join(" ") : "not recorded") : r.responsePhonemes.join(" "), r.score, r.percent, r.comment
   ]);
 
   return [...headerRows, cols, ...rows]
@@ -1284,14 +1305,19 @@ function showReport() {
   readClientForm();
   const summaries = listSummaries();
   const rows = state.results.map(r => {
-    const combinedResponse = r.targetPhonemes.map((target, idx) => {
-      const advanced = r.responsePhonemes?.[idx];
-      const selectedCorrect = r.selectedTargetCorrectness?.[idx];
+    let combinedResponse;
+    if (r.scoringMode === "fast") {
+      combinedResponse = Number(r.score) === 4 ? r.targetPhonemes.join(" ") : "not recorded";
+    } else {
+      combinedResponse = r.targetPhonemes.map((target, idx) => {
+        const advanced = r.responsePhonemes?.[idx];
+        const selectedCorrect = r.selectedTargetCorrectness?.[idx];
 
-      if (advanced !== null && advanced !== undefined && advanced !== "") return advanced;
-      if (selectedCorrect) return target;
-      return "–";
-    }).join(" ");
+        if (advanced !== null && advanced !== undefined && advanced !== "") return advanced;
+        if (selectedCorrect) return target;
+        return "–";
+      }).join(" ");
+    }
 
     return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${conditionLabel(r.presentationCondition || r.stimulusEar)}</td><td>${r.transducer || ""}</td><td>${r.maskerLevelReport ?? r.maskerLevelDbA ?? "none"}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
   }).join("");
