@@ -784,5 +784,47 @@ details summary {
   .card { box-shadow: none; border: 0; padding: 0; }
 }
 
+/* ── Level nudge bar ── */
+.level-nudge-bar {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  margin: .4rem 0 .5rem;
+  padding: .4rem .6rem;
+  background: #f7f8f9;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.level-nudge-btn {
+  padding: .3rem .7rem;
+  font-weight: 700;
+  font-size: .95rem;
+  min-width: 2.8rem;
+}
+
+.level-nudge-display {
+  font-size: 1.5rem;
+  font-weight: 700;
+  letter-spacing: -.02em;
+  min-width: 5.5rem;
+  text-align: center;
+  color: #1a1a1a;
+}
+
+.level-nudge-unit {
+  font-size: .85rem;
+  font-weight: 500;
+  color: #666;
+}
+
+.running-score {
+  margin-left: auto;
+  font-size: .88rem;
+  font-weight: 600;
+  color: #444;
+  white-space: nowrap;
+}
+
 /* ── Screen-test bottom padding ── */
 #screen-test .card:first-child { padding-bottom: 6.5rem; }

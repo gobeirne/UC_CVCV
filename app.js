@@ -229,21 +229,69 @@ function bindEvents() {
   $("backToTestBtn").onclick = () => show("screen-test");
   $("printBtn").onclick = () => window.print();
 
+  $("levelDownBtn").onclick = () => nudgeLevel(-5);
+  $("levelUpBtn").onclick   = () => nudgeLevel(+5);
+
   document.addEventListener("keydown", (e) => {
     if (!$("screen-test").classList.contains("active")) return;
-    if (["0","1","2","3","4"].includes(e.key)) {
+    const tag = document.activeElement.tagName;
+    const inInput = ["INPUT","TEXTAREA","SELECT"].includes(tag);
+
+    // 0–4: fast score + auto-advance + autoplay
+    if (["0","1","2","3","4"].includes(e.key) && !inInput) {
+      e.preventDefault();
+      const score = Number(e.key);
       state.scoringMode = "fast";
-      state.trialScore = Number(e.key);
+      state.trialScore = score;
       state.targetSelections = [false,false,false,false];
       state.responseSelections = [null,null,null,null];
       markScoreButton();
       renderSelectionColours();
+      nextTrial();
+      return;
     }
-    if (e.code === "Space" && !["INPUT","TEXTAREA","SELECT"].includes(document.activeElement.tagName)) {
+
+    // Space: play carrier + kupu
+    if (e.code === "Space" && !inInput) {
       e.preventDefault();
       playCurrent(true);
+      return;
     }
-    if (e.key === "Enter") nextTrial();
+
+    // R: replay kupu only
+    if ((e.key === "r" || e.key === "R") && !inInput) {
+      e.preventDefault();
+      playCurrent(false);
+      return;
+    }
+
+    // ←/→: stimulus level ±5
+    if (e.key === "ArrowLeft" && !inInput)  { e.preventDefault(); nudgeLevel(-5); return; }
+    if (e.key === "ArrowRight" && !inInput) { e.preventDefault(); nudgeLevel(+5); return; }
+
+    // ↑/↓: masker level ±5
+    if (e.key === "ArrowUp" && !inInput) {
+      e.preventDefault();
+      nudgeMasker(+5);
+      return;
+    }
+    if (e.key === "ArrowDown" && !inInput) {
+      e.preventDefault();
+      nudgeMasker(-5);
+      return;
+    }
+
+    // Shift+M: toggle masker
+    if (e.key === "M" && e.shiftKey && !inInput) {
+      e.preventDefault();
+      toggleMasker();
+      return;
+    }
+
+    // Enter: next (kept for backwards compat)
+    if (e.key === "Enter" && !inInput) nextTrial();
+
+    // Escape: abandon dialog
     if (e.key === "Escape") $("abandonDialog").showModal();
   });
 }
@@ -813,6 +861,7 @@ function renderTrial() {
   const conditionChip = $("currentMeta").querySelector(".condition-chip");
   if (conditionChip) conditionChip.onclick = openConditionDialog;
   if ($("phonemeHeading")) $("phonemeHeading").textContent = `Phoneme scoring - ${word}`;
+  updateLevelDisplay();
   renderTargetPhonemes([c1,v1,c2,v2]);
   renderAdvanced([c1,v1,c2,v2]);
   renderSelectionColours();
@@ -849,8 +898,15 @@ function renderTrialNavigator() {
     const scoreClass = result ? (result.score >= 3 ? "good" : "bad") : "";
     item.innerHTML = `<span>${idx + 1}</span><span>${trial.word[0]}</span><span class="trial-nav-score ${scoreClass}">${scoreText}</span>`;
     item.onclick = () => {
-      if (result) openTrialEdit(resultIdx);
-      else if (idx >= state.currentTrialIndex) {
+      if (idx === state.currentTrialIndex) {
+        // Replay current word
+        playCurrent(true);
+      } else if (result) {
+        // Jump back to this trial for overwrite replay
+        state.currentTrialIndex = idx;
+        renderTrial();
+      } else if (idx > state.currentTrialIndex) {
+        // Jump forward
         state.currentTrialIndex = idx;
         renderTrial();
       }
@@ -1212,6 +1268,78 @@ function toggleMasker() {
   else startMasker();
 }
 
+function nudgeMasker(delta) {
+  const newVal = (Number($("maskLevelLive").value) || 40) + delta;
+  $("maskLevelLive").value = newVal;
+  $("maskLevel").value = newVal;
+  updateLiveMasker();
+}
+
+function nudgeLevel(delta) {
+  const q = currentQueueItem();
+  if (!q) return;
+  const newLevel = q.levelDbA + delta;
+
+  // Check if results exist for the current list
+  const listHasResults = state.results.some(r =>
+    r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA
+  );
+
+  if (listHasResults) {
+    const ok = confirm(
+      `Changing level from ${q.levelDbA} to ${newLevel} dB will discard results for this list. Continue?`
+    );
+    if (!ok) return;
+    // Mark current list abandoned, remove its results, create new queue entry
+    q.status = "abandoned";
+    state.results = state.results.filter(r =>
+      !(r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA)
+    );
+    const newEntry = {
+      listNumber: q.listNumber,
+      levelDbA: newLevel,
+      status: "in-progress",
+      id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now())
+    };
+    state.queue.splice(state.currentListIndex + 1, 0, newEntry);
+    state.currentListIndex++;
+    state.currentTrials = [...state.currentTrials]; // keep same trial order
+    state.currentTrialIndex = 0;
+    state.currentResultIndexByTrial = {};
+  } else {
+    q.levelDbA = newLevel;
+  }
+
+  updateLevelDisplay();
+  renderTrial();
+  drawPI();
+  saveSession();
+}
+
+function updateLevelDisplay() {
+  const q = currentQueueItem();
+  if (!q) return;
+  const el = $("levelNudgeLabel");
+  if (el) el.textContent = String(q.levelDbA);
+  updateRunningScore();
+  drawPI();
+}
+
+function updateRunningScore() {
+  const el = $("runningScore");
+  if (!el) return;
+  const q = currentQueueItem();
+  if (!q) { el.textContent = "—"; return; }
+  const listResults = state.results.filter(r =>
+    r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA
+  );
+  if (!listResults.length) { el.textContent = "—"; return; }
+  const correct = listResults.reduce((sum, r) => sum + Number(r.score || 0), 0);
+  const total = listResults.length * 4;
+  const pct = Math.round((correct / total) * 100);
+  el.textContent = `${correct}/${total} phonemes · ${pct}%`;
+}
+
 function nextTrial() {
   const trial = currentTrial();
   const q = currentQueueItem();
@@ -1250,8 +1378,12 @@ function nextTrial() {
 
   state.currentTrialIndex++;
   if (state.currentTrialIndex >= state.currentTrials.length) finishList();
-  else renderTrial();
+  else {
+    renderTrial();
+    // scheduleAutoplay is called inside renderTrial already
+  }
   drawPI();
+  updateRunningScore();
   saveSession();
 }
 
@@ -1349,6 +1481,34 @@ function drawPI() {
       ctx.fillStyle = "#111";
       ctx.fillText(sym, px - 7, py + 7);
     }
+  }
+
+  // Crosshair: current stimulus level & % correct at that level
+  const q = currentQueueItem();
+  if (q && $("screen-test").classList.contains("active")) {
+    const clevel = q.levelDbA;
+    const listResults = state.results.filter(r =>
+      r.listNumber === q.listNumber && r.listLevelDbA === clevel
+    );
+    const cpct = listResults.length
+      ? Math.round((listResults.reduce((s,r) => s + Number(r.score||0), 0) / (listResults.length * 4)) * 100)
+      : 0;
+    const cx = left + (Math.max(0, Math.min(100, clevel)) / 100) * (right - left);
+    const cy = bottom - (cpct / 100) * (bottom - top);
+
+    ctx.save();
+    ctx.strokeStyle = "#b31b1b";
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    // Vertical line
+    ctx.beginPath(); ctx.moveTo(cx, top); ctx.lineTo(cx, bottom); ctx.stroke();
+    // Horizontal line
+    ctx.beginPath(); ctx.moveTo(left, cy); ctx.lineTo(right, cy); ctx.stroke();
+    // Centre dot
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#b31b1b";
+    ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2); ctx.fill();
+    ctx.restore();
   }
 }
 
