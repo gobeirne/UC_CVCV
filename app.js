@@ -876,29 +876,133 @@ function renderAdvanced(targets) {
     const col = document.createElement("div");
     col.className = "advanced-col";
     col.innerHTML = `<h4>${idx + 1}: /${target}/</h4>`;
+
+    function selectOption(p) {
+      [...col.querySelectorAll(".phoneme-option, .diphthong-chip")].forEach(x =>
+        x.classList.remove("selected", "correct-selected", "incorrect-selected")
+      );
+      state.scoringMode = "advanced";
+      state.responseSelections[idx] = p === "–" ? "–" : p;
+      state.targetSelections[idx] = false;
+      state.trialScore = computeCurrentScore();
+      markScoreButton();
+      renderSelectionColours();
+    }
+
     ["–", ...PHONEMES[type]].forEach(p => {
       const btn = document.createElement("div");
       btn.className = "phoneme-option" + (p === "–" ? " blank-option" : "");
       btn.textContent = p;
       btn.title = p === "–" ? "Blank / no response for this position" : "";
       btn.onclick = () => {
-        [...col.querySelectorAll(".phoneme-option")].forEach(x => x.classList.remove("selected", "correct-selected", "incorrect-selected"));
+        // In V columns, if we're mid-diphthong-build, clicking a vowel completes it
+        if (type === "V" && col._diphthongFirst) {
+          const combo = col._diphthongFirst + p;
+          col._diphthongFirst = null;
+          col.querySelectorAll(".phoneme-option").forEach(x => x.classList.remove("diphthong-first-selected"));
+          renderDiphthongChip(col, combo, idx, selectOption);
+          selectOption(combo);
+          return;
+        }
         btn.classList.add("selected");
-        state.scoringMode = "advanced";
-        state.responseSelections[idx] = p === "–" ? "–" : p;
-        state.targetSelections[idx] = false;
-        state.trialScore = computeCurrentScore();
-        markScoreButton();
-        renderSelectionColours();
+        selectOption(p);
       };
       col.appendChild(btn);
     });
+
+    // Diphthong builder — V columns only
+    if (type === "V") {
+      const divider = document.createElement("div");
+      divider.className = "diphthong-divider";
+      divider.textContent = "＋ diphthong";
+      divider.title = "Click a vowel above to start building a diphthong";
+      divider.onclick = () => {
+        // Toggle diphthong-build mode: next vowel click becomes first component
+        if (col._diphthongBuildMode) {
+          col._diphthongBuildMode = false;
+          col._diphthongFirst = null;
+          col.querySelectorAll(".phoneme-option").forEach(x => x.classList.remove("diphthong-first-selected"));
+          divider.classList.remove("active");
+          divider.textContent = "＋ diphthong";
+        } else {
+          col._diphthongBuildMode = true;
+          divider.classList.add("active");
+          divider.textContent = "select 1st vowel…";
+          // Re-wire vowel clicks for first-component selection
+          col.querySelectorAll(".phoneme-option:not(.blank-option)").forEach(btn => {
+            btn._origOnclick = btn.onclick;
+            btn.onclick = () => {
+              const base = btn.textContent;
+              // Strip macron for diphthong base (aː → a)
+              const baseShort = V_EQ[base] || base;
+              col._diphthongFirst = baseShort;
+              col.querySelectorAll(".phoneme-option").forEach(x => x.classList.remove("diphthong-first-selected"));
+              btn.classList.add("diphthong-first-selected");
+              divider.textContent = `/${baseShort}/ + select 2nd…`;
+              // Now re-wire for second component
+              col.querySelectorAll(".phoneme-option:not(.blank-option)").forEach(btn2 => {
+                btn2.onclick = () => {
+                  const base2 = V_EQ[btn2.textContent] || btn2.textContent;
+                  const combo = baseShort + base2;
+                  col._diphthongFirst = null;
+                  col._diphthongBuildMode = false;
+                  divider.classList.remove("active");
+                  divider.textContent = "＋ diphthong";
+                  col.querySelectorAll(".phoneme-option").forEach(x => {
+                    x.classList.remove("diphthong-first-selected");
+                    // Restore original onclick
+                    if (x._origOnclick) { x.onclick = x._origOnclick; x._origOnclick = null; }
+                  });
+                  renderDiphthongChip(col, combo, idx, selectOption);
+                  selectOption(combo);
+                };
+              });
+            };
+          });
+        }
+      };
+      col.appendChild(divider);
+
+      // Placeholder for diphthong chip area
+      const chipArea = document.createElement("div");
+      chipArea.className = "diphthong-chip-area";
+      col._chipArea = chipArea;
+      col.appendChild(chipArea);
+    }
+
     box.appendChild(col);
   });
 }
 
+function renderDiphthongChip(col, combo, idx, selectOption) {
+  const chipArea = col._chipArea;
+  if (!chipArea) return;
+  chipArea.innerHTML = "";
+  const chip = document.createElement("div");
+  chip.className = "diphthong-chip";
+  chip.textContent = combo;
+  chip.title = `Diphthong /${combo}/ — click to clear`;
+  chip.onclick = () => {
+    chipArea.innerHTML = "";
+    state.responseSelections[idx] = null;
+    state.trialScore = computeCurrentScore();
+    markScoreButton();
+    renderSelectionColours();
+  };
+  chipArea.appendChild(chip);
+}
+
+function isDiphthong(p) {
+  // A diphthong is two base vowels joined, e.g. "au", "ai", "ei"
+  // Each component must be a bare vowel (a e i o u), not a long vowel symbol
+  return typeof p === "string" && /^[aeiou]{2}$/.test(p);
+}
+
 function equivalent(target, response) {
   if (!response || response === "–") return false;
+  // Diphthong: must match exactly (au ≠ ao)
+  if (isDiphthong(target) || isDiphthong(response)) return target === response;
+  // Long/short vowel equivalence
   if (V_EQ[target] && V_EQ[response]) return V_EQ[target] === V_EQ[response];
   return target === response;
 }
@@ -962,6 +1066,15 @@ function renderSelectionColours() {
       btn.classList.toggle("correct-selected", (isChosen && equivalent(target, p)) || isTopSelected || fastCorrect);
       btn.classList.toggle("incorrect-selected", isChosen && !equivalent(target, p));
     });
+
+    // Colour the diphthong chip if present
+    const chip = col.querySelector(".diphthong-chip");
+    if (chip) {
+      const isChosen = explicitResponse === chip.textContent;
+      chip.classList.toggle("selected", isChosen);
+      chip.classList.toggle("correct-selected", isChosen && equivalent(target, chip.textContent));
+      chip.classList.toggle("incorrect-selected", isChosen && !equivalent(target, chip.textContent));
+    }
   });
 }
 
@@ -978,6 +1091,15 @@ function clearScoring() {
   state.responseSelections = [null,null,null,null];
   $("trialComment").value = "";
   document.querySelectorAll(".phoneme-target,.phoneme-option").forEach(x => x.classList.remove("selected", "correct-selected", "incorrect-selected"));
+  document.querySelectorAll(".diphthong-chip-area").forEach(a => a.innerHTML = "");
+  document.querySelectorAll(".advanced-col").forEach(col => {
+    col._diphthongFirst = null;
+    col._diphthongBuildMode = false;
+  });
+  document.querySelectorAll(".diphthong-divider").forEach(d => {
+    d.classList.remove("active");
+    d.textContent = "＋ diphthong";
+  });
   markScoreButton();
 }
 

@@ -700,7 +700,70 @@ details summary {
 }
 
 
-/* v11 mobile scoring fixes */
+/* Diphthong builder */
+.diphthong-divider {
+  margin: .45rem 0 .2rem;
+  padding: .3rem .4rem;
+  border-radius: 8px;
+  background: #f0f0f0;
+  border: 1px dashed #bbb;
+  font-size: .82rem;
+  font-weight: 700;
+  color: #555;
+  cursor: pointer;
+  text-align: center;
+  user-select: none;
+  transition: background .15s, color .15s;
+}
+
+.diphthong-divider.active {
+  background: #fffbe6;
+  border-color: #d97706;
+  color: #92400e;
+}
+
+.phoneme-option.diphthong-first-selected {
+  border-color: #d97706 !important;
+  background: #fffbe6 !important;
+  color: #92400e !important;
+}
+
+.diphthong-chip-area {
+  min-height: 2rem;
+  margin-top: .2rem;
+}
+
+.diphthong-chip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.4rem;
+  border-radius: 10px;
+  border: 2px solid #7c3aed;
+  background: #f5f3ff;
+  color: #4c1d95;
+  font-size: 1.2rem;
+  font-weight: 850;
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s;
+}
+
+.diphthong-chip:hover {
+  background: #ede9fe;
+}
+
+.diphthong-chip.correct-selected {
+  border-color: #15803d !important;
+  background: #ecfdf3 !important;
+  color: #14532d !important;
+}
+
+.diphthong-chip.incorrect-selected {
+  border-color: #b91c1c !important;
+  background: #fef2f2 !important;
+  color: #7f1d1d !important;
+}
 #screen-test .card:first-child {
   padding-bottom: 6.5rem;
 }
