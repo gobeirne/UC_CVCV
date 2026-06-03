@@ -88,6 +88,7 @@ const state = {
   scoringMode: "none",
   targetSelections: [false,false,false,false],
   responseSelections: [null,null,null,null],
+  _pendingAdvance: null,
   audio: {
     ctx: null,
     masker: null,
@@ -142,15 +143,41 @@ function setupFastScoreButtons() {
     btn.type = "button";
     btn.dataset.score = String(i);
     btn.textContent = String(i);
-    btn.onclick = () => {
-      state.scoringMode = "fast";
-      state.trialScore = i;
-      state.targetSelections = [false,false,false,false];
-      state.responseSelections = [null,null,null,null];
-      markScoreButton();
-      renderSelectionColours();
-    };
+    btn.onclick = () => fastScore(i);
     box.appendChild(btn);
+  }
+}
+
+// Shared fast-score logic used by buttons and keyboard.
+// Sets the score then schedules auto-advance after 600ms.
+// The trial navigator click handler cancels the pending advance
+// and instead jumps to the clicked trial.
+function fastScore(score) {
+  state.scoringMode = "fast";
+  state.trialScore = score;
+  state.targetSelections = [false,false,false,false];
+  state.responseSelections = [null,null,null,null];
+  markScoreButton();
+  renderSelectionColours();
+  schedulePendingAdvance();
+}
+
+function schedulePendingAdvance() {
+  // Cancel any existing pending advance
+  if (state._pendingAdvance) {
+    clearTimeout(state._pendingAdvance);
+    state._pendingAdvance = null;
+  }
+  state._pendingAdvance = setTimeout(() => {
+    state._pendingAdvance = null;
+    nextTrial();
+  }, 600);
+}
+
+function cancelPendingAdvance() {
+  if (state._pendingAdvance) {
+    clearTimeout(state._pendingAdvance);
+    state._pendingAdvance = null;
   }
 }
 
@@ -217,8 +244,8 @@ function bindEvents() {
   $("toggleMaskBtn").onclick = toggleMasker;
 
   setupFastScoreButtons();
-  $("clearScoreBtn").onclick = clearScoring;
-  $("nextTrialBtn").onclick = nextTrial;
+  $("clearScoreBtn").onclick = () => { cancelPendingAdvance(); clearScoring(); };
+  $("nextTrialBtn").onclick = () => { cancelPendingAdvance(); nextTrial(); };
   $("abandonBtn").onclick = () => $("abandonDialog").showModal();
   $("confirmAbandonBtn").onclick = abandonList;
 
@@ -237,17 +264,10 @@ function bindEvents() {
     const tag = document.activeElement.tagName;
     const inInput = ["INPUT","TEXTAREA","SELECT"].includes(tag);
 
-    // 0–4: fast score + auto-advance + autoplay
+    // 0–4: fast score + auto-advance (600ms window for nav click interception)
     if (["0","1","2","3","4"].includes(e.key) && !inInput) {
       e.preventDefault();
-      const score = Number(e.key);
-      state.scoringMode = "fast";
-      state.trialScore = score;
-      state.targetSelections = [false,false,false,false];
-      state.responseSelections = [null,null,null,null];
-      markScoreButton();
-      renderSelectionColours();
-      nextTrial();
+      fastScore(Number(e.key));
       return;
     }
 
@@ -899,16 +919,52 @@ function renderTrialNavigator() {
     item.innerHTML = `<span>${idx + 1}</span><span>${trial.word[0]}</span><span class="trial-nav-score ${scoreClass}">${scoreText}</span>`;
     item.onclick = () => {
       if (idx === state.currentTrialIndex) {
-        // Replay current word
+        // Replay current word — cancel any pending advance first
+        cancelPendingAdvance();
         playCurrent(true);
-      } else if (result) {
-        // Jump back to this trial for overwrite replay
+      } else if (result || idx > state.currentTrialIndex) {
+        // Jump to this trial — save current score first if pending, then jump
+        cancelPendingAdvance();
+        // Save current trial's score before jumping
+        const curTrial = currentTrial();
+        const curQ = currentQueueItem();
+        if (curTrial && curQ && state.scoringMode !== "none") {
+          const targets = curTrial.word.slice(1,5);
+          const score = computeCurrentScore();
+          const payload = {
+            timestamp: new Date().toISOString(),
+            client: state.client,
+            listNumber: curQ.listNumber,
+            listLevelDbA: curQ.levelDbA,
+            presentationCondition: $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value,
+            stimulusEar: $("stimEar").value,
+            transducer: $("transducer") ? $("transducer").value : "",
+            maskerEar: $("maskEar").value,
+            maskerLevelDbA: Number($("maskLevel").value),
+            trialOrder: curTrial.order,
+            presentedWord: curTrial.word[0],
+            targetPhonemes: targets,
+            scoringMode: state.scoringMode,
+            responsePhonemes: state.scoringMode === "fast" ? [null,null,null,null] : [...state.responseSelections],
+            selectedTargetCorrectness: state.scoringMode === "fast" ? [false,false,false,false] : [...state.targetSelections],
+            score,
+            percent: score * 25,
+            maskerLevelReport: $("maskEar").value === "off" ? "none" : Number($("maskLevel").value),
+            comment: $("trialComment").value.trim()
+          };
+          const existingIdx = state.currentResultIndexByTrial[state.currentTrialIndex];
+          if (Number.isFinite(existingIdx)) {
+            state.results[existingIdx] = payload;
+          } else {
+            state.results.push(payload);
+            state.currentResultIndexByTrial[state.currentTrialIndex] = state.results.length - 1;
+          }
+        }
         state.currentTrialIndex = idx;
         renderTrial();
-      } else if (idx > state.currentTrialIndex) {
-        // Jump forward
-        state.currentTrialIndex = idx;
-        renderTrial();
+        drawPI();
+        updateRunningScore();
+        saveSession();
       }
     };
     box.appendChild(item);
@@ -1388,6 +1444,19 @@ function nextTrial() {
 }
 
 function finishList() {
+  // Find the first trial that has no recorded result yet
+  const firstUnscored = state.currentTrials.findIndex((_, idx) =>
+    !Number.isFinite(state.currentResultIndexByTrial[idx])
+  );
+
+  if (firstUnscored >= 0) {
+    // There are gaps — jump to the first unscored trial
+    state.currentTrialIndex = firstUnscored;
+    renderTrial();
+    return;
+  }
+
+  // All trials scored — truly done
   const q = currentQueueItem();
   q.status = "complete";
   stopMasker();

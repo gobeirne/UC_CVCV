@@ -604,7 +604,7 @@ menu {
 .trial-navigator {
   display: grid;
   gap: .3rem;
-  max-height: 330px;
+  max-height: 420px;
   overflow: auto;
   padding-right: .2rem;
 }
@@ -766,7 +766,7 @@ details summary {
 
   aside.card { min-height: 640px; }
   #piCanvas { max-height: 430px; }
-  .trial-navigator { max-height: 520px; }
+  .trial-navigator { max-height: 580px; }
 }
 
 @media (max-height: 760px) and (min-width: 760px) {
