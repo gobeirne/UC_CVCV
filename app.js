@@ -248,9 +248,19 @@ function bindEvents() {
   });
 }
 
+const SCREEN_SUBTITLES = {
+  "screen-client":      "Client details",
+  "screen-calibration": "Calibration",
+  "screen-setup":       "Test setup",
+  "screen-test":        "Testing",
+  "screen-report":      "Report"
+};
+
 function show(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
   $(id).classList.add("active");
+  const sub = $("headerSubtitle");
+  if (sub) sub.textContent = SCREEN_SUBTITLES[id] || "University of Canterbury Hearing Clinic";
 }
 
 function readClientForm() {
@@ -895,51 +905,42 @@ function renderAdvanced(targets) {
       btn.textContent = p;
       btn.title = p === "–" ? "Blank / no response for this position" : "";
       btn.onclick = () => {
-        // In V columns, if we're mid-diphthong-build, clicking a vowel completes it
-        if (type === "V" && col._diphthongFirst) {
-          const combo = col._diphthongFirst + p;
-          col._diphthongFirst = null;
-          col.querySelectorAll(".phoneme-option").forEach(x => x.classList.remove("diphthong-first-selected"));
-          renderDiphthongChip(col, combo, idx, selectOption);
-          selectOption(combo);
-          return;
-        }
         btn.classList.add("selected");
         selectOption(p);
       };
       col.appendChild(btn);
     });
 
-    // Diphthong builder — V columns only
+    // Diphthong builder — V columns only (positions 2 and 4)
     if (type === "V") {
       const divider = document.createElement("div");
       divider.className = "diphthong-divider";
       divider.textContent = "＋ diphthong";
-      divider.title = "Click a vowel above to start building a diphthong";
       divider.onclick = () => {
-        // Toggle diphthong-build mode: next vowel click becomes first component
         if (col._diphthongBuildMode) {
+          // Cancel build mode
           col._diphthongBuildMode = false;
           col._diphthongFirst = null;
-          col.querySelectorAll(".phoneme-option").forEach(x => x.classList.remove("diphthong-first-selected"));
+          col.querySelectorAll(".phoneme-option").forEach(b => {
+            b.classList.remove("diphthong-first-selected");
+            if (b._origOnclick) { b.onclick = b._origOnclick; b._origOnclick = null; }
+          });
           divider.classList.remove("active");
           divider.textContent = "＋ diphthong";
         } else {
+          // Enter build mode — next vowel click = first component
           col._diphthongBuildMode = true;
           divider.classList.add("active");
           divider.textContent = "select 1st vowel…";
-          // Re-wire vowel clicks for first-component selection
           col.querySelectorAll(".phoneme-option:not(.blank-option)").forEach(btn => {
             btn._origOnclick = btn.onclick;
             btn.onclick = () => {
-              const base = btn.textContent;
-              // Strip macron for diphthong base (aː → a)
-              const baseShort = V_EQ[base] || base;
+              const baseShort = V_EQ[btn.textContent] || btn.textContent;
               col._diphthongFirst = baseShort;
-              col.querySelectorAll(".phoneme-option").forEach(x => x.classList.remove("diphthong-first-selected"));
+              col.querySelectorAll(".phoneme-option").forEach(b => b.classList.remove("diphthong-first-selected"));
               btn.classList.add("diphthong-first-selected");
               divider.textContent = `/${baseShort}/ + select 2nd…`;
-              // Now re-wire for second component
+              // Re-wire all vowel buttons for second component
               col.querySelectorAll(".phoneme-option:not(.blank-option)").forEach(btn2 => {
                 btn2.onclick = () => {
                   const base2 = V_EQ[btn2.textContent] || btn2.textContent;
@@ -948,10 +949,9 @@ function renderAdvanced(targets) {
                   col._diphthongBuildMode = false;
                   divider.classList.remove("active");
                   divider.textContent = "＋ diphthong";
-                  col.querySelectorAll(".phoneme-option").forEach(x => {
-                    x.classList.remove("diphthong-first-selected");
-                    // Restore original onclick
-                    if (x._origOnclick) { x.onclick = x._origOnclick; x._origOnclick = null; }
+                  col.querySelectorAll(".phoneme-option").forEach(b => {
+                    b.classList.remove("diphthong-first-selected");
+                    if (b._origOnclick) { b.onclick = b._origOnclick; b._origOnclick = null; }
                   });
                   renderDiphthongChip(col, combo, idx, selectOption);
                   selectOption(combo);
@@ -963,7 +963,6 @@ function renderAdvanced(targets) {
       };
       col.appendChild(divider);
 
-      // Placeholder for diphthong chip area
       const chipArea = document.createElement("div");
       chipArea.className = "diphthong-chip-area";
       col._chipArea = chipArea;
@@ -993,14 +992,13 @@ function renderDiphthongChip(col, combo, idx, selectOption) {
 }
 
 function isDiphthong(p) {
-  // A diphthong is two base vowels joined, e.g. "au", "ai", "ei"
-  // Each component must be a bare vowel (a e i o u), not a long vowel symbol
+  // Two bare vowels joined, e.g. "au", "ai", "ei" — no macrons
   return typeof p === "string" && /^[aeiou]{2}$/.test(p);
 }
 
 function equivalent(target, response) {
   if (!response || response === "–") return false;
-  // Diphthong: must match exactly (au ≠ ao)
+  // Diphthongs must match exactly (au ≠ ao)
   if (isDiphthong(target) || isDiphthong(response)) return target === response;
   // Long/short vowel equivalence
   if (V_EQ[target] && V_EQ[response]) return V_EQ[target] === V_EQ[response];
@@ -1261,33 +1259,30 @@ function finishList() {
   const q = currentQueueItem();
   q.status = "complete";
   stopMasker();
-  const next = state.queue.findIndex(x => x.status === "queued");
   renderQueue();
   saveSession();
+  const next = state.queue.findIndex(x => x.status === "queued");
   if (next >= 0) {
-    const proceed = confirm("List complete. Present the next queued list?");
+    const proceed = confirm(`List complete. Start next queued list (List ${state.queue[next].listNumber} @ ${state.queue[next].levelDbA} dB)?`);
     if (proceed) {
       state.currentListIndex = next;
       beginCurrentList();
+      return;
     }
   } else {
     alert("All queued lists complete.");
-    showReport();
   }
+  show("screen-setup");
 }
 
 function abandonList() {
   const q = currentQueueItem();
   if (!q) return;
   q.status = "abandoned";
+  stopMasker();
   saveSession();
-  const next = state.queue.findIndex(x => x.status === "queued");
-  if (next >= 0) {
-    state.currentListIndex = next;
-    beginCurrentList();
-  } else {
-    showReport();
-  }
+  renderQueue();
+  show("screen-setup");
 }
 
 function listSummaries() {
