@@ -826,6 +826,15 @@ details summary {
   white-space: nowrap;
 }
 
+.report-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: .75rem;
+  padding-bottom: .75rem;
+  border-bottom: 2px solid var(--uc-red);
+}
+
 /* ── Setup landing page layout ── */
 .setup-layout {
   display: grid;

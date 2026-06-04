@@ -136,6 +136,7 @@ function init() {
   offerStoredCalibration();
   renderRecentSessions();
   renderQueue();
+  updateSetupResultsSummary();
 }
 
 // ── Clinic settings (device-persistent, separate from session) ──
@@ -204,6 +205,49 @@ function saveSession() {
   recent.unshift(entry);
   recent = recent.slice(0, 5);
   localStorage.setItem(recentKey, JSON.stringify(recent));
+}
+
+function updateSetupResultsSummary() {
+  const el = $("setupResultsSummary");
+  if (!el) return;
+  const n = state.results?.length || 0;
+  if (!n) { el.textContent = "No results recorded yet."; return; }
+  const summaries = listSummaries();
+  const lines = summaries.map(s =>
+    `List ${s.listNumber} @ ${s.level} dB(A) — ${conditionLabel(s.condition)} — ${s.percent}% (${s.trials} trial${s.trials !== 1 ? "s" : ""})`
+  );
+  el.innerHTML = lines.join("<br>");
+}
+
+function openSavedJson(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      if (!data.results) { alert("This file doesn't appear to be a valid results JSON."); return; }
+      // Restore state from file
+      if (data.client)      state.client = data.client;
+      if (data.calibration) state.calibration = data.calibration;
+      if (data.queue)       state.queue = data.queue;
+      if (data.results)     state.results = data.results;
+      // Repopulate client fields
+      $("clientName").value = state.client?.name || "";
+      $("clientId").value   = state.client?.id   || "";
+      if ($("clientDob"))  $("clientDob").value  = state.client?.dob  || "";
+      $("sessionDate").value = state.client?.date || $("sessionDate").value;
+      $("sessionNotes").value = state.client?.notes || "";
+      renderQueue();
+      drawPI();
+      updateSetupResultsSummary();
+      renderRecentSessions();
+      alert(`Loaded ${state.results.length} results for ${state.client?.name || "unknown client"}.`);
+    } catch { alert("Could not read file — it may be corrupt or the wrong format."); }
+  };
+  reader.readAsText(file);
+  // Reset input so the same file can be re-opened
+  e.target.value = "";
 }
 
 function renderRecentSessions() {
@@ -306,6 +350,7 @@ function restoreSession() {
     renderQueue();
     drawPI();
     renderRecentSessions();
+    updateSetupResultsSummary();
   } catch { alert("Could not restore session — data may be corrupt."); }
 }
 
@@ -444,6 +489,14 @@ function bindEvents() {
   $("reportBtn").onclick = showReport;
   $("backToTestBtn").onclick = () => show("screen-test");
   $("printBtn").onclick = () => window.print();
+
+  // Setup page results panel
+  if ($("setupReportBtn"))       $("setupReportBtn").onclick = showReport;
+  if ($("setupDownloadJsonBtn")) $("setupDownloadJsonBtn").onclick = downloadJson;
+  if ($("setupDownloadTsvBtn"))  $("setupDownloadTsvBtn").onclick = downloadTsv;
+  if ($("setupCopyTsvBtn"))      $("setupCopyTsvBtn").onclick = copyTsv;
+  if ($("openJsonBtn"))          $("openJsonBtn").onclick = () => $("openJsonFileInput").click();
+  if ($("openJsonFileInput"))    $("openJsonFileInput").onchange = openSavedJson;
 
   $("levelDownBtn").onclick = () => nudgeLevel(-5);
   $("levelUpBtn").onclick   = () => nudgeLevel(+5);
@@ -1572,6 +1625,7 @@ function nextTrial() {
   }
   drawPI();
   updateRunningScore();
+  updateSetupResultsSummary();
   saveSession();
 }
 
@@ -1605,6 +1659,7 @@ function finishList() {
   } else {
     alert("All queued lists complete.");
   }
+  updateSetupResultsSummary();
   show("screen-setup");
 }
 
@@ -1616,6 +1671,7 @@ function abandonList() {
   saveSession();
   renderQueue();
   renderRecentSessions();
+  updateSetupResultsSummary();
   show("screen-setup");
 }
 
@@ -1783,6 +1839,10 @@ async function copyTsv() {
 
 function showReport() {
   readClientForm();
+  if (!state.results || !state.results.length) {
+    alert("No results to report yet.");
+    return;
+  }
   const summaries = listSummaries();
   const rows = state.results.map(r => {
     let combinedResponse;
@@ -1792,19 +1852,31 @@ function showReport() {
       combinedResponse = r.targetPhonemes.map((target, idx) => {
         const advanced = r.responsePhonemes?.[idx];
         const selectedCorrect = r.selectedTargetCorrectness?.[idx];
-
         if (advanced !== null && advanced !== undefined && advanced !== "") return advanced;
         if (selectedCorrect) return target;
         return "–";
       }).join(" ");
     }
-
     return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${conditionLabel(r.presentationCondition || r.stimulusEar)}</td><td>${r.transducer || ""}</td><td>${r.maskerLevelReport ?? r.maskerLevelDbA ?? "none"}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
   }).join("");
-  const summaryRows = summaries.map(s => `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${conditionLabel(s.condition || s.ear)}</td><td>${s.masked ? "Yes" : "No"}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`).join("");
+  const summaryRows = summaries.map(s =>
+    `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${conditionLabel(s.condition || s.ear)}</td><td>${s.masked ? "Yes" : "No"}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`
+  ).join("");
+
+  // Draw PI on the hidden canvas then capture it
   drawPI();
   const piDataUrl = $("piCanvas") ? $("piCanvas").toDataURL("image/png") : "";
+
+  const logoHtml = state.clinicLogo
+    ? `<img src="${state.clinicLogo}" alt="Clinic logo" style="max-height:60px;max-width:200px;object-fit:contain">`
+    : "";
+  const clinicNameVal = ($("clinicName") ? $("clinicName").value.trim() : "") || "University of Canterbury Hearing Clinic";
+
   $("reportContent").innerHTML = `
+    <div class="report-header-row">
+      <div>${logoHtml}</div>
+      <div style="text-align:right;color:#555;font-size:.9rem">${clinicNameVal}</div>
+    </div>
     <h1>Te reo Māori CVCV Speech Audiometry Report</h1>
     <div class="report-grid">
       <div>
@@ -1814,13 +1886,15 @@ function showReport() {
         <p><b>Date:</b> ${state.client.date || ""}</p>
       </div>
       <div>
-        <p><b>Clinician:</b> ${state.client.clinician || ""}</p>
-        <p><b>Calibration reference:</b> ${state.calibration.isCalibrated ? state.calibration.measuredDbA + " dB(A)" : "not set"}</p>
+        <p><b>Clinician:</b> ${state.client.clinician || ""}${state.client.role ? " — " + state.client.role : ""}</p>
+        <p><b>Facility:</b> ${state.client.facility || ""}</p>
+        <p><b>Calibration:</b> ${state.calibration.isCalibrated ? state.calibration.measuredDbA + " dB(A)" : "not set"}</p>
         <p><b>Notes:</b> ${state.client.notes || ""}</p>
       </div>
     </div>
     <h2>Performance intensity function</h2>
     ${piDataUrl ? `<img class="report-pi" src="${piDataUrl}" alt="Performance intensity plot">` : ""}
+    <p class="report-pi-legend">× Left &nbsp; ○ Right &nbsp; B Binaural &nbsp; S/A/U Sound field / Aided / Unaided</p>
     <h2>Summary</h2>
     <table class="report-table"><thead><tr><th>List</th><th>Level dB(A)</th><th>Condition</th><th>Masked</th><th>Trials</th><th>% correct</th></tr></thead><tbody>${summaryRows}</tbody></table>
     <h2>Trial data</h2>

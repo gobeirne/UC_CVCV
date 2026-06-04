@@ -146,7 +146,20 @@
             </div>
 
             <div class="card">
-              <h3>Calibration</h3>
+              <h3>Results</h3>
+              <p id="setupResultsSummary" class="hint" style="font-size:.85rem;margin:.2rem 0 .6rem">No results recorded yet.</p>
+              <div class="actions stack">
+                <button id="setupReportBtn" type="button">Report / print PDF</button>
+                <button id="setupDownloadJsonBtn" type="button" class="secondary">Download JSON</button>
+                <button id="setupDownloadTsvBtn" type="button" class="secondary">Download TSV</button>
+                <button id="setupCopyTsvBtn" type="button" class="secondary">Copy TSV</button>
+              </div>
+              <div style="margin-top:.75rem;border-top:1px solid var(--line);padding-top:.65rem">
+                <p class="hint" style="font-size:.82rem;margin:.1rem 0 .4rem">Open a previously saved JSON file to reload results:</p>
+                <button id="openJsonBtn" type="button" class="secondary" style="width:100%">📂 Open saved results…</button>
+                <input id="openJsonFileInput" type="file" accept="application/json,.json" style="display:none">
+              </div>
+            </div>
               <p class="hint" style="font-size:.85rem">Turn device volume fully up, play the calibration tone, measure output in dB(A), then stop and enter the value.</p>
               <div class="actions wrap">
                 <button id="calibrateBtn" type="button">▶ Calibration tone</button>
