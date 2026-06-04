@@ -13,137 +13,162 @@
       <img id="ucLogo" src="assets/UClogo.png" alt="University of Canterbury logo" onerror="this.style.display='none'">
       <div>
         <h1>Te reo Māori CVCV Speech Audiometry</h1>
-        <p id="headerSubtitle">University of Canterbury Hearing Clinic</p>
+        <p id="headerSubtitle">Setup</p>
       </div>
     </header>
 
     <main>
-      <section id="screen-client" class="screen active">
-        <div class="card">
-          <h2>Client details</h2>
-          <div class="grid two">
-            <label>Client name <input id="clientName" autocomplete="name"></label>
-            <label>NHI / ID <input id="clientId"></label>
-            <label>Date of birth <input id="clientDob" type="date"></label>
-            <label>Date <input id="sessionDate" type="date"></label>
-            <label>Clinician <input id="clinician"></label>
-          </div>
-          <label>Notes <textarea id="sessionNotes" rows="3"></textarea></label>
-          <div class="actions">
-            <button id="restoreBtn" type="button" class="secondary">Restore saved session</button>
-            <button id="toCalibrationBtn" type="button">Continue</button>
-          </div>
-        </div>
-      </section>
+      <!-- ── SETUP (landing page) ── -->
+      <section id="screen-setup" class="screen active">
+        <div class="setup-layout">
 
-      <section id="screen-calibration" class="screen">
-        <div class="card">
-          <h2>Calibration</h2>
-          <p class="hint">Turn the device volume fully up, play the looping calibration sound, measure the output in dB(A), then stop and enter the measured value. The slider below is only for testing calibrated output levels.</p>
+          <!-- Left: client + test config + queue -->
+          <div class="setup-main">
 
-          <div class="actions wrap">
-            <button id="calibrateBtn" type="button">Calibration</button>
-            <button id="testCalBtn" type="button" class="secondary" hidden>Test Calibrated Sound</button>
-            <button id="skipCalBtn" type="button" class="secondary">Continue</button>
-          </div>
-
-          <div class="volume-panel">
-            <label>Test output level
-              <input id="outputLevel" type="range" min="-100" max="0" step="0.1" value="0">
-            </label>
-            <div class="level-readout">
-              <strong id="outputLevelLabel">0 dB FS</strong>
-              <span id="modeBadge">Uncalibrated Mode</span>
+            <div class="card">
+              <h2>Client</h2>
+              <div class="grid two">
+                <label>Client name <input id="clientName" autocomplete="name" placeholder="Full name"></label>
+                <label>NHI / ID <input id="clientId" placeholder="NHI number"></label>
+                <label>Date of birth <input id="clientDob" type="date"></label>
+                <label>Test date <input id="sessionDate" type="date"></label>
+                <label>Clinician <input id="clinician" placeholder="Full name"></label>
+                <label>Role <input id="clinicianRole" placeholder="e.g. Audiologist"></label>
+              </div>
+              <label>Location / facility <input id="facilityName" placeholder="e.g. Northland DHB"></label>
+              <label>Notes <textarea id="sessionNotes" rows="2"></textarea></label>
             </div>
+
+            <div class="card">
+              <h2>Test configuration</h2>
+              <div class="grid three">
+                <label>Presentation condition
+                  <select id="presentationCondition">
+                    <option value="left">Left</option>
+                    <option value="right">Right</option>
+                    <option value="binaural">Binaural</option>
+                    <option value="soundfield">Sound field</option>
+                    <option value="aided">Aided</option>
+                    <option value="unaided">Unaided</option>
+                  </select>
+                </label>
+                <label>Stimulus routing
+                  <select id="stimEar">
+                    <option value="left">Left channel</option>
+                    <option value="right">Right channel</option>
+                    <option value="binaural">Binaural channels</option>
+                  </select>
+                </label>
+                <label>Transducer
+                  <select id="transducer">
+                    <option value="insert earphones">Insert earphones</option>
+                    <option value="headphones">Headphones</option>
+                    <option value="sound field speaker">Sound field speaker</option>
+                    <option value="bone conductor">Bone conductor</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
+                <label>Masking
+                  <select id="maskingEnabled">
+                    <option value="off">Off</option>
+                    <option value="on">On</option>
+                  </select>
+                </label>
+                <label>Masker ear
+                  <select id="maskEar" disabled>
+                    <option value="off">Off</option>
+                    <option value="left">Left</option>
+                    <option value="right" selected>Right</option>
+                    <option value="binaural">Binaural</option>
+                  </select>
+                </label>
+                <label>Masker level, dB(A)
+                  <input id="maskLevel" type="number" step="5" value="40">
+                </label>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2>List queue</h2>
+              <div class="queue-add-row">
+                <label>List
+                  <select id="listChoice"></select>
+                </label>
+                <label>Level, dB(A)
+                  <input id="listLevel" type="number" step="5" value="60">
+                </label>
+                <button id="addListBtn" type="button">Add list</button>
+                <button id="addRandomBtn" type="button" class="secondary">Random</button>
+              </div>
+              <div class="queue-add-row">
+                <label>Add <input id="randomCount" type="number" min="1" max="10" value="1" style="width:4rem"> random lists at
+                  <input id="randomLevel" type="number" step="5" value="60" style="width:5rem"> dB(A)
+                </label>
+                <button id="addNRandomBtn" type="button" class="secondary">Add</button>
+              </div>
+              <div class="queue-toolbar">
+                <button id="addQueueBtn" type="button" class="small-add">+ Add list</button>
+              </div>
+              <div id="queueChips" class="chips queue-chips"></div>
+              <div class="actions">
+                <button id="startBtn" type="button">▶ Start testing</button>
+              </div>
+            </div>
+
+            <div class="card" id="recentSessionsCard">
+              <h2>Recent sessions</h2>
+              <div id="recentSessionsList"></div>
+              <p class="hint" id="noRecentHint">No saved session found.</p>
+            </div>
+
           </div>
 
-          <p id="calStatus" class="status"></p>
+          <!-- Right: persistent clinic settings + calibration -->
+          <aside class="setup-aside">
+
+            <div class="card">
+              <h3>Clinic / report settings</h3>
+              <label>Clinic / organisation name
+                <input id="clinicName" placeholder="e.g. UC Hearing Clinic">
+              </label>
+              <div class="logo-section">
+                <p class="hint" style="margin:.4rem 0 .3rem">Report logo</p>
+                <div class="logo-preview-row">
+                  <div id="logoPreview" class="logo-preview"></div>
+                  <div class="logo-btns">
+                    <button id="replaceLogoBtn" type="button" class="secondary">Replace logo…</button>
+                    <button id="removeLogoBtn" type="button" class="secondary danger-text" style="display:none">Remove logo</button>
+                    <input id="logoFileInput" type="file" accept="image/png,image/svg+xml" style="display:none">
+                  </div>
+                </div>
+                <p class="hint" style="font-size:.8rem">PNG or SVG recommended. Shown on printed reports.</p>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>Calibration</h3>
+              <p class="hint" style="font-size:.85rem">Turn device volume fully up, play the calibration tone, measure output in dB(A), then stop and enter the value.</p>
+              <div class="actions wrap">
+                <button id="calibrateBtn" type="button">▶ Calibration tone</button>
+                <button id="testCalBtn" type="button" class="secondary" hidden>Test level</button>
+              </div>
+              <div class="volume-panel" style="margin-top:.7rem">
+                <label>Test output level
+                  <input id="outputLevel" type="range" min="-100" max="0" step="0.1" value="0">
+                </label>
+                <div class="level-readout">
+                  <strong id="outputLevelLabel">0 dB FS</strong>
+                  <span id="modeBadge">Uncalibrated</span>
+                </div>
+              </div>
+              <p id="calStatus" class="status" style="margin-top:.5rem"></p>
+            </div>
+
+          </aside>
         </div>
       </section>
 
-      <section id="screen-setup" class="screen">
-        <div class="card">
-          <h2>Test setup</h2>
-          <div class="grid three">
-            <label>Presentation condition
-              <select id="presentationCondition">
-                <option value="left">Left</option>
-                <option value="right">Right</option>
-                <option value="binaural">Binaural</option>
-                <option value="soundfield">Sound field</option>
-                <option value="aided">Aided</option>
-                <option value="unaided">Unaided</option>
-              </select>
-            </label>
-            <label>Stimulus routing
-              <select id="stimEar">
-                <option value="left">Left channel</option>
-                <option value="right">Right channel</option>
-                <option value="binaural">Binaural channels</option>
-              </select>
-            </label>
-            <label>Masking
-              <select id="maskingEnabled">
-                <option value="off">Off</option>
-                <option value="on">On</option>
-              </select>
-            </label>
-            <label>Masker ear
-              <select id="maskEar" disabled>
-                <option value="off">Off</option>
-                <option value="left">Left</option>
-                <option value="right" selected>Right</option>
-                <option value="binaural">Binaural</option>
-              </select>
-            </label>
-            <label>Masker level, dB(A)
-              <input id="maskLevel" type="number" step="5" value="40">
-              <span id="maskLevelHint" class="inline-hint">Can be changed during testing</span>
-            </label>
-            <label>Transducer
-              <select id="transducer">
-                <option value="insert earphones">Insert earphones</option>
-                <option value="headphones">Headphones</option>
-                <option value="sound field speaker">Sound field speaker</option>
-                <option value="bone conductor">Bone conductor</option>
-                <option value="other">Other</option>
-              </select>
-            </label>
-          </div>
-
-          <h3>List queue</h3>
-          <div class="setup-row">
-            <label>Choose list
-              <select id="listChoice"></select>
-            </label>
-            <label>Level, dB(A)
-              <input id="listLevel" type="number" step="5" value="60">
-            </label>
-            <button id="addListBtn" type="button">Add list</button>
-            <button id="addRandomBtn" type="button" class="secondary">Add random list</button>
-          </div>
-
-          <div class="setup-row">
-            <label>Number of random lists
-              <input id="randomCount" type="number" min="1" max="10" value="1">
-            </label>
-            <label>Random list level, dB(A)
-              <input id="randomLevel" type="number" step="5" value="60">
-            </label>
-            <button id="addNRandomBtn" type="button" class="secondary">Add n random</button>
-          </div>
-
-          <div class="queue-toolbar">
-            <button id="addQueueBtn" type="button" class="small-add">+ Add list</button>
-          </div>
-          <div id="queueChips" class="chips queue-chips"></div>
-
-          <div class="actions">
-            <button id="startBtn" type="button">Start testing</button>
-          </div>
-        </div>
-      </section>
-
+      <!-- ── TEST ── -->
       <section id="screen-test" class="screen">
         <div class="test-layout">
           <div class="card">
@@ -184,18 +209,13 @@
             </div>
 
             <div class="actions wrap">
-              <button id="playWordBtn" type="button" class="big">Play “Kōrero mai...” + kupu</button>
+              <button id="playWordBtn" type="button" class="big">Play "Kōrero mai..." + kupu</button>
               <button id="repeatWordBtn" type="button" class="secondary">Replay kupu only</button>
               <button id="toggleMaskBtn" type="button" class="secondary">Start masker</button>
             </div>
 
             <h3>Fast score</h3>
-            <div class="score-buttons">
-              <button data-score="1">1</button>
-              <button data-score="2">2</button>
-              <button data-score="3">3</button>
-              <button data-score="4">4</button>
-            </div>
+            <div class="score-buttons"></div>
 
             <div class="phoneme-heading"><h3 id="phonemeHeading">Phoneme scoring</h3></div>
             <div id="targetPhonemes" class="phoneme-row"></div>
@@ -236,6 +256,7 @@
         </div>
       </section>
 
+      <!-- ── REPORT ── -->
       <section id="screen-report" class="screen">
         <div class="card report-card">
           <div class="actions no-print">
@@ -248,6 +269,7 @@
     </main>
   </div>
 
+  <!-- Dialogs -->
   <dialog id="trialEditDialog">
     <form method="dialog" class="dialog-card">
       <h2 id="trialEditTitle">Edit trial</h2>
@@ -274,7 +296,7 @@
   <dialog id="conditionDialog">
     <form method="dialog" class="dialog-card">
       <h2>Change presentation condition</h2>
-      <p class="hint">This changes the condition recorded for future trials. Previous trial data remains as recorded.</p>
+      <p class="hint">Changes condition for future trials. Previous data unchanged.</p>
       <label>Presentation condition
         <select id="conditionEditSelect">
           <option value="left">Left</option>
@@ -297,12 +319,8 @@
       <h2 id="queueDialogTitle">Edit list</h2>
       <input id="queueEditIndex" type="hidden">
       <div class="grid two">
-        <label>List
-          <select id="queueListNumber"></select>
-        </label>
-        <label>Level, dB(A)
-          <input id="queueLevel" type="number" step="5" value="60">
-        </label>
+        <label>List <select id="queueListNumber"></select></label>
+        <label>Level, dB(A) <input id="queueLevel" type="number" step="5" value="60"></label>
       </div>
       <menu>
         <button id="queueDeleteBtn" value="delete" class="danger" type="button">Delete</button>
@@ -315,7 +333,7 @@
   <dialog id="abandonDialog">
     <form method="dialog" class="dialog-card">
       <h2>Abandon this list?</h2>
-      <p>Data already entered will be saved. The remaining trials in this list will be marked abandoned.</p>
+      <p>Data already entered will be saved.</p>
       <menu>
         <button value="cancel" class="secondary">Cancel</button>
         <button id="confirmAbandonBtn" value="abandon" class="danger">Abandon list</button>

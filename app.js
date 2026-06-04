@@ -89,6 +89,7 @@ const state = {
   targetSelections: [false,false,false,false],
   responseSelections: [null,null,null,null],
   _pendingAdvance: null,
+  clinicLogo: null,
   audio: {
     ctx: null,
     masker: null,
@@ -126,15 +127,187 @@ function init() {
     $("listChoice").appendChild(opt);
     if ($("queueListNumber")) $("queueListNumber").appendChild(opt.cloneNode(true));
   }
+  loadClinicSettings();
+  loadDraftIntoForm();
   bindEvents();
   setupCalibrationSlider();
   drawPI();
-  loadDraftIntoForm();
   if ($("maskingEnabled")) updateMaskingEnabled();
   offerStoredCalibration();
+  renderRecentSessions();
+  renderQueue();
 }
 
-function setupFastScoreButtons() {
+// ── Clinic settings (device-persistent, separate from session) ──
+function loadClinicSettings() {
+  const saved = localStorage.getItem("ucCVCVClinic");
+  if (!saved) return;
+  try {
+    const d = JSON.parse(saved);
+    if ($("clinicName") && d.name) $("clinicName").value = d.name;
+    if (d.logo) renderLogoPreview(d.logo);
+    if ($("facilityName") && d.facility) $("facilityName").value = d.facility;
+    if ($("clinician") && d.clinician) $("clinician").value = d.clinician;
+    if ($("clinicianRole") && d.role) $("clinicianRole").value = d.role;
+    if ($("transducer") && d.transducer) $("transducer").value = d.transducer;
+  } catch {}
+}
+
+function saveClinicSettings() {
+  const data = {
+    name: $("clinicName") ? $("clinicName").value.trim() : "",
+    facility: $("facilityName") ? $("facilityName").value.trim() : "",
+    clinician: $("clinician") ? $("clinician").value.trim() : "",
+    role: $("clinicianRole") ? $("clinicianRole").value.trim() : "",
+    transducer: $("transducer") ? $("transducer").value : "",
+    logo: state.clinicLogo || null
+  };
+  localStorage.setItem("ucCVCVClinic", JSON.stringify(data));
+}
+
+function renderLogoPreview(dataUrl) {
+  const preview = $("logoPreview");
+  if (!preview) return;
+  preview.innerHTML = dataUrl ? `<img src="${dataUrl}" alt="Clinic logo">` : "";
+  if ($("removeLogoBtn")) $("removeLogoBtn").style.display = dataUrl ? "" : "none";
+  state.clinicLogo = dataUrl || null;
+}
+
+// ── Recent sessions ──
+function saveSession() {
+  const key = "ucTeReoSpeechAudiometry";
+  const payload = {
+    savedAt: new Date().toISOString(),
+    client: state.client,
+    calibration: state.calibration,
+    queue: state.queue,
+    currentListIndex: state.currentListIndex,
+    currentTrialIndex: state.currentTrialIndex,
+    currentTrials: state.currentTrials,
+    results: state.results
+  };
+  localStorage.setItem(key, JSON.stringify(payload));
+
+  // Also store in recent sessions list (keep last 5)
+  const recentKey = "ucCVCVRecentSessions";
+  let recent = [];
+  try { recent = JSON.parse(localStorage.getItem(recentKey) || "[]"); } catch {}
+  const entry = {
+    savedAt: payload.savedAt,
+    clientName: state.client?.name || "",
+    clientId: state.client?.id || "",
+    date: state.client?.date || "",
+    resultCount: state.results?.length || 0
+  };
+  // Remove existing entry for same client+date if present
+  recent = recent.filter(r => !(r.clientName === entry.clientName && r.date === entry.date));
+  recent.unshift(entry);
+  recent = recent.slice(0, 5);
+  localStorage.setItem(recentKey, JSON.stringify(recent));
+}
+
+function renderRecentSessions() {
+  const list = $("recentSessionsList");
+  const hint = $("noRecentHint");
+  if (!list) return;
+  const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
+  if (!saved) { if (hint) hint.style.display = ""; return; }
+  try {
+    const data = JSON.parse(saved);
+    if (!data.client) { if (hint) hint.style.display = ""; return; }
+    if (hint) hint.style.display = "none";
+    list.innerHTML = "";
+    const item = document.createElement("div");
+    item.className = "recent-session-item";
+    const when = data.savedAt ? new Date(data.savedAt).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "short" }) : "earlier";
+    const resultCount = data.results?.length || 0;
+    item.innerHTML = `
+      <div>
+        <div class="recent-session-name">${data.client.name || "Unnamed client"}</div>
+        <div class="recent-session-meta">${data.client.date || ""} · ${resultCount} trial${resultCount !== 1 ? "s" : ""} recorded · saved ${when}</div>
+      </div>
+      <button class="recent-session-dismiss" title="Dismiss" type="button">×</button>
+    `;
+    item.querySelector(".recent-session-dismiss").onclick = (e) => {
+      e.stopPropagation();
+      localStorage.removeItem("ucTeReoSpeechAudiometry");
+      renderRecentSessions();
+    };
+    item.onclick = (e) => {
+      if (e.target.classList.contains("recent-session-dismiss")) return;
+      restoreSession();
+    };
+    list.appendChild(item);
+  } catch { if (hint) hint.style.display = ""; }
+}
+
+const SCREEN_SUBTITLES = {
+  "screen-setup":  "Setup",
+  "screen-test":   "Testing",
+  "screen-report": "Report"
+};
+
+function show(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  $(id).classList.add("active");
+  const sub = $("headerSubtitle");
+  if (sub) sub.textContent = SCREEN_SUBTITLES[id] || "Setup";
+}
+
+function readClientForm() {
+  state.client = {
+    name: $("clientName").value.trim(),
+    id: $("clientId").value.trim(),
+    dob: $("clientDob") ? $("clientDob").value : "",
+    date: $("sessionDate").value,
+    clinician: $("clinician").value.trim(),
+    role: $("clinicianRole") ? $("clinicianRole").value.trim() : "",
+    facility: $("facilityName") ? $("facilityName").value.trim() : "",
+    notes: $("sessionNotes").value.trim()
+  };
+  saveClinicSettings();
+  saveSession();
+}
+
+function loadDraftIntoForm() {
+  const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
+  if (!saved) return;
+  try {
+    const parsed = JSON.parse(saved);
+    if (parsed.client) {
+      // Client fields — always load from saved
+      $("clientName").value = parsed.client.name || "";
+      $("clientId").value = parsed.client.id || "";
+      if ($("clientDob")) $("clientDob").value = parsed.client.dob || "";
+      $("sessionDate").value = parsed.client.date || $("sessionDate").value;
+      $("sessionNotes").value = parsed.client.notes || "";
+      // Clinician/role/facility loaded from clinic settings (device-persistent), not session
+    }
+  } catch {}
+}
+
+function restoreSession() {
+  const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
+  if (!saved) return;
+  try {
+    const parsed = JSON.parse(saved);
+    Object.assign(state, parsed);
+    // Repopulate client fields
+    if (parsed.client) {
+      $("clientName").value = parsed.client.name || "";
+      $("clientId").value = parsed.client.id || "";
+      if ($("clientDob")) $("clientDob").value = parsed.client.dob || "";
+      $("sessionDate").value = parsed.client.date || $("sessionDate").value;
+      $("sessionNotes").value = parsed.client.notes || "";
+    }
+    setupCalibrationSlider();
+    if (state.calibration?.isCalibrated) $("testCalBtn").hidden = false;
+    syncMaskerControls();
+    renderQueue();
+    drawPI();
+    renderRecentSessions();
+  } catch { alert("Could not restore session — data may be corrupt."); }
+}
   const box = document.querySelector(".score-buttons");
   if (!box) return;
   box.innerHTML = "";
@@ -182,19 +355,31 @@ function cancelPendingAdvance() {
 }
 
 function bindEvents() {
-  $("toCalibrationBtn").onclick = () => { readClientForm(); show("screen-calibration"); };
-  $("restoreBtn").onclick = restoreSession;
+  // Calibration
   $("calibrateBtn").onclick = toggleCalibration;
   $("testCalBtn").onclick = testCalibratedSound;
-  $("skipCalBtn").onclick = () => {
-    stopCalibrationSound();
-    stopTestCalibratedSound();
-    show("screen-setup");
-  };
   $("outputLevel").addEventListener("input", updateOutputLevelFromSlider);
   $("outputLevel").addEventListener("change", updateOutputLevelFromSlider);
   $("outputLevel").addEventListener("touchend", updateOutputLevelFromSlider);
 
+  // Clinic settings — save on change
+  ["clinicName","facilityName","clinician","clinicianRole","transducer"].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener("change", saveClinicSettings);
+  });
+
+  // Logo upload
+  if ($("replaceLogoBtn")) $("replaceLogoBtn").onclick = () => $("logoFileInput").click();
+  if ($("logoFileInput")) $("logoFileInput").onchange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => { renderLogoPreview(ev.target.result); saveClinicSettings(); };
+    reader.readAsDataURL(file);
+  };
+  if ($("removeLogoBtn")) $("removeLogoBtn").onclick = () => { renderLogoPreview(null); saveClinicSettings(); };
+
+  // Stimulus routing
   $("stimEar").onchange = () => {
     const ear = $("stimEar").value;
     if ($("maskingEnabled") && $("maskingEnabled").value === "off") {
@@ -226,6 +411,7 @@ function bindEvents() {
     updateLiveMasker();
   });
 
+  // Queue
   $("addListBtn").onclick = () => addList(Number($("listChoice").value), snap5($("listLevel").value));
   $("addRandomBtn").onclick = () => addRandomList(snap5($("listLevel").value));
   $("addNRandomBtn").onclick = addNRandomLists;
@@ -239,6 +425,7 @@ function bindEvents() {
   if ($("conditionSaveBtn")) $("conditionSaveBtn").onclick = saveConditionDialog;
   if ($("trialEditSaveBtn")) $("trialEditSaveBtn").onclick = saveTrialEditDialog;
 
+  // Test screen
   $("playWordBtn").onclick = () => playCurrent(true);
   $("repeatWordBtn").onclick = () => playCurrent(false);
   $("toggleMaskBtn").onclick = toggleMasker;
@@ -1493,6 +1680,7 @@ function abandonList() {
   stopMasker();
   saveSession();
   renderQueue();
+  renderRecentSessions();
   show("screen-setup");
 }
 
