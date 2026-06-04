@@ -387,6 +387,10 @@ function ensureAudio() {
   if (!state.audio.ctx) {
     state.audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
   }
+  // iOS suspends AudioContext until a user gesture — resume on every call
+  if (state.audio.ctx.state === "suspended") {
+    state.audio.ctx.resume().catch(() => {});
+  }
   return state.audio.ctx;
 }
 
@@ -453,9 +457,9 @@ function gainForLevel(levelDbA) {
     const attenuation = Number(state.calibration.measuredDbA) - Number(levelDbA);
     return Math.pow(10, -attenuation / 20);
   }
-  // Uncalibrated fallback treats requested level as dB FS if negative, otherwise full scale.
-  const dbfs = Math.min(0, Number(levelDbA));
-  return Math.pow(10, dbfs / 20);
+  // Uncalibrated: all files are already level-normalised relative to each other,
+  // so play everything at unity gain and let device volume control the output.
+  return 1.0;
 }
 
 async function playFirstAvailable(bases, ear, levelDbA, loop=false) {
@@ -1433,10 +1437,16 @@ function nextTrial() {
   }
 
   state.currentTrialIndex++;
+  // Skip over any trials that already have a score (jumped-to trials filled in earlier)
+  while (
+    state.currentTrialIndex < state.currentTrials.length &&
+    Number.isFinite(state.currentResultIndexByTrial[state.currentTrialIndex])
+  ) {
+    state.currentTrialIndex++;
+  }
   if (state.currentTrialIndex >= state.currentTrials.length) finishList();
   else {
     renderTrial();
-    // scheduleAutoplay is called inside renderTrial already
   }
   drawPI();
   updateRunningScore();
