@@ -308,6 +308,8 @@ function restoreSession() {
     renderRecentSessions();
   } catch { alert("Could not restore session — data may be corrupt."); }
 }
+
+function setupFastScoreButtons() {
   const box = document.querySelector(".score-buttons");
   if (!box) return;
   box.innerHTML = "";
@@ -503,72 +505,6 @@ function bindEvents() {
   });
 }
 
-const SCREEN_SUBTITLES = {
-  "screen-client":      "Client details",
-  "screen-calibration": "Calibration",
-  "screen-setup":       "Test setup",
-  "screen-test":        "Testing",
-  "screen-report":      "Report"
-};
-
-function show(id) {
-  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
-  $(id).classList.add("active");
-  const sub = $("headerSubtitle");
-  if (sub) sub.textContent = SCREEN_SUBTITLES[id] || "University of Canterbury Hearing Clinic";
-}
-
-function readClientForm() {
-  state.client = {
-    name: $("clientName").value.trim(),
-    id: $("clientId").value.trim(),
-    dob: $("clientDob") ? $("clientDob").value : "",
-    date: $("sessionDate").value,
-    clinician: $("clinician").value.trim(),
-    notes: $("sessionNotes").value.trim()
-  };
-  saveSession();
-}
-
-function loadDraftIntoForm() {
-  const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
-  if (!saved) return;
-  try {
-    const parsed = JSON.parse(saved);
-    if (parsed.client) {
-      $("clientName").value = parsed.client.name || "";
-      $("clientId").value = parsed.client.id || "";
-      if ($("clientDob")) $("clientDob").value = parsed.client.dob || "";
-      $("sessionDate").value = parsed.client.date || $("sessionDate").value;
-      $("clinician").value = parsed.client.clinician || "";
-      $("sessionNotes").value = parsed.client.notes || "";
-    }
-  } catch {}
-}
-
-function restoreSession() {
-  const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
-  if (!saved) return alert("No saved session found.");
-  Object.assign(state, JSON.parse(saved));
-  setupCalibrationSlider();
-  if (state.calibration?.isCalibrated) $("testCalBtn").hidden = false;
-  syncMaskerControls();
-  renderQueue();
-  drawPI();
-  show("screen-setup");
-}
-
-function saveSession() {
-  localStorage.setItem("ucTeReoSpeechAudiometry", JSON.stringify({
-    client: state.client,
-    calibration: state.calibration,
-    queue: state.queue,
-    currentListIndex: state.currentListIndex,
-    currentTrialIndex: state.currentTrialIndex,
-    currentTrials: state.currentTrials,
-    results: state.results
-  }));
-}
 
 function ensureAudio() {
   if (!state.audio.ctx) {
@@ -721,12 +657,11 @@ function offerStoredCalibration() {
   try {
     const data = JSON.parse(saved);
     if (!data.level) return;
-    const when = data.timestamp ? new Date(data.timestamp).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "medium" }) : "an earlier session";
-    const useIt = confirm(`You last calibrated this device to ${data.level} dB A on ${when}.\nUse this calibration?`);
-    if (useIt) {
-      alert("Remember to turn your device volume to full.");
-      applyCalibrationLevel(Number(data.level), data.timestamp);
-    }
+    applyCalibrationLevel(Number(data.level), data.timestamp);
+    const when = data.timestamp
+      ? new Date(data.timestamp).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "short" })
+      : "earlier";
+    if ($("calStatus")) $("calStatus").textContent = `Calibration restored: ${data.level} dB(A) from ${when}. Device volume must be at maximum.`;
   } catch {}
 }
 
