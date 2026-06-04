@@ -174,8 +174,19 @@ function renderLogoPreview(dataUrl) {
   state.clinicLogo = dataUrl || null;
 }
 
-// ── Recent sessions ──
 function saveSession() {
+  // Always snapshot current form values so recent sessions reflect live state
+  state.client = {
+    name:     $("clientName")     ? $("clientName").value.trim()     : (state.client?.name     || ""),
+    id:       $("clientId")       ? $("clientId").value.trim()       : (state.client?.id       || ""),
+    dob:      $("clientDob")      ? $("clientDob").value             : (state.client?.dob      || ""),
+    date:     $("sessionDate")    ? $("sessionDate").value           : (state.client?.date     || ""),
+    clinician:$("clinician")      ? $("clinician").value.trim()      : (state.client?.clinician|| ""),
+    role:     $("clinicianRole")  ? $("clinicianRole").value.trim()  : (state.client?.role     || ""),
+    facility: $("facilityName")   ? $("facilityName").value.trim()   : (state.client?.facility || ""),
+    notes:    $("sessionNotes")   ? $("sessionNotes").value.trim()   : (state.client?.notes    || "")
+  };
+
   const key = "ucTeReoSpeechAudiometry";
   const payload = {
     savedAt: new Date().toISOString(),
@@ -188,23 +199,7 @@ function saveSession() {
     results: state.results
   };
   localStorage.setItem(key, JSON.stringify(payload));
-
-  // Also store in recent sessions list (keep last 5)
-  const recentKey = "ucCVCVRecentSessions";
-  let recent = [];
-  try { recent = JSON.parse(localStorage.getItem(recentKey) || "[]"); } catch {}
-  const entry = {
-    savedAt: payload.savedAt,
-    clientName: state.client?.name || "",
-    clientId: state.client?.id || "",
-    date: state.client?.date || "",
-    resultCount: state.results?.length || 0
-  };
-  // Remove existing entry for same client+date if present
-  recent = recent.filter(r => !(r.clientName === entry.clientName && r.date === entry.date));
-  recent.unshift(entry);
-  recent = recent.slice(0, 5);
-  localStorage.setItem(recentKey, JSON.stringify(recent));
+  renderRecentSessions();
 }
 
 function updateSetupResultsSummary() {
@@ -487,7 +482,7 @@ function bindEvents() {
   $("downloadTsvBtn").onclick = downloadTsv;
   if ($("copyTsvBtn")) $("copyTsvBtn").onclick = copyTsv;
   $("reportBtn").onclick = showReport;
-  $("backToTestBtn").onclick = () => show("screen-test");
+  $("backToTestBtn").onclick = () => show(state._reportCalledFrom || "screen-setup");
   $("printBtn").onclick = () => window.print();
 
   // Setup page results panel
@@ -1657,7 +1652,8 @@ function finishList() {
       return;
     }
   } else {
-    alert("All queued lists complete.");
+    alert("All queued lists complete. Results are being saved automatically.");
+    autoSaveJson();
   }
   updateSetupResultsSummary();
   show("screen-setup");
@@ -1669,6 +1665,7 @@ function abandonList() {
   q.status = "abandoned";
   stopMasker();
   saveSession();
+  if (state.results?.length) autoSaveJson();
   renderQueue();
   renderRecentSessions();
   updateSetupResultsSummary();
@@ -1783,10 +1780,32 @@ function safeName() {
   return (state.client.name || "client").replace(/[^\p{Letter}\p{Number}]+/gu, "_");
 }
 
-function downloadJson() {
+function autoSaveJson() {
+  // Silently trigger a JSON download so data is never lost on session end
   readClientForm();
-  const payload = { exportedAt: new Date().toISOString(), app: "UC Te reo Māori CVCV Speech Audiometry", client: state.client, setup: { presentationCondition: $("presentationCondition") ? $("presentationCondition").value : "", stimulusRouting: $("stimEar") ? $("stimEar").value : "", transducer: $("transducer") ? $("transducer").value : "", maskingAtExport: $("maskEar") && $("maskEar").value !== "off", maskerEar: $("maskEar") ? $("maskEar").value : "", maskerLevelDbA: $("maskLevel") ? $("maskLevel").value : "" }, calibration: state.calibration, queue: state.queue, results: state.results, summaries: listSummaries() };
-  download(`${safeName()}_te_reo_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    app: "UC Te reo Māori CVCV Speech Audiometry",
+    client: state.client,
+    setup: {
+      presentationCondition: $("presentationCondition") ? $("presentationCondition").value : "",
+      stimulusRouting: $("stimEar") ? $("stimEar").value : "",
+      transducer: $("transducer") ? $("transducer").value : "",
+      maskingAtExport: $("maskEar") && $("maskEar").value !== "off",
+      maskerEar: $("maskEar") ? $("maskEar").value : "",
+      maskerLevelDbA: $("maskLevel") ? $("maskLevel").value : ""
+    },
+    calibration: state.calibration,
+    queue: state.queue,
+    results: state.results,
+    summaries: listSummaries()
+  };
+  const date = (state.client.date || new Date().toISOString().slice(0,10)).replace(/-/g,"");
+  download(`${safeName()}_${date}_te_reo_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
+}
+
+function downloadJson() {
+  autoSaveJson();
 }
 
 function buildTsv() {
@@ -1843,6 +1862,7 @@ function showReport() {
     alert("No results to report yet.");
     return;
   }
+  state._reportCalledFrom = document.querySelector(".screen.active")?.id || "screen-setup";
   const summaries = listSummaries();
   const rows = state.results.map(r => {
     let combinedResponse;
