@@ -449,7 +449,7 @@ async function openTrainingPicker() {
   btn.textContent = "Loading clients…";
   const profiles = await loadTrainingClients();
   btn.disabled = false;
-  btn.textContent = "🎓 Perform training";
+  btn.textContent = "🎓 Training mode…";
   if (!profiles.length) {
     alert(`No training clients found.\nAdd ClientXX.json profiles and response mp3s to the /${TRAINING_DIR} folder.`);
     return;
@@ -722,6 +722,7 @@ function bindEvents() {
     // Accept the true score and move on (logged with attempts count)
     const trial = currentTrial();
     if (trial && Number.isFinite(trial.trainingTrueScore)) {
+      trial.trainingRevealed = true;
       state.scoringMode = "fast";
       state.trialScore = trial.trainingTrueScore;
       markScoreButton();
@@ -1964,7 +1965,8 @@ function nextTrial() {
       trainingFile: trial.trainingFile || null,
       trueResponsePhonemes: trial.trainingResponse || null,
       trueScore: Number.isFinite(trial.trainingTrueScore) ? trial.trainingTrueScore : null,
-      attempts: (trial.trainingAttempts || 0) + 1
+      attempts: (trial.trainingAttempts || 0) + 1,
+      revealed: !!trial.trainingRevealed
     } : {})
   };
 
@@ -2013,6 +2015,14 @@ function finishList() {
   stopMasker();
   renderQueue();
   saveSession();
+
+  // Training: show the performance summary first; continue on close.
+  if (trainingActive() && showTrainingSummary()) return;
+
+  finishListProceed();
+}
+
+function finishListProceed() {
   const next = state.queue.findIndex(x => x.status === "queued");
   if (next >= 0) {
     const proceed = confirm(`List complete. Start next queued list (List ${state.queue[next].listNumber} @ ${state.queue[next].levelDbA} dB)?`);
@@ -2027,6 +2037,73 @@ function finishList() {
   }
   updateSetupResultsSummary();
   show("screen-setup");
+}
+
+// Build and show the end-of-list training performance summary.
+// Returns true if the dialog was shown (finishListProceed runs on close).
+function showTrainingSummary() {
+  const dlg = $("trainingSummaryDialog");
+  if (!dlg) return false;
+
+  // This run's results, in trial order
+  const entries = Object.keys(state.currentResultIndexByTrial)
+    .map(k => state.results[state.currentResultIndexByTrial[k]])
+    .filter(Boolean);
+
+  // Only trials that actually had a recording count toward scoring accuracy
+  const scored = entries.filter(e => e.training && e.trainingFile);
+  if (!scored.length) return false;
+
+  const total = scored.length;
+  const firstTry = scored.filter(e => e.attempts === 1);
+  const revealed = scored.filter(e => e.revealed);
+  const retried = scored.filter(e => e.attempts > 1 && !e.revealed);
+  const pct = Math.round((firstTry.length / total) * 100);
+
+  // Count the teaching-moment phonemes this list contained
+  let dialectCount = 0, lengthCount = 0;
+  for (const e of scored) {
+    if (!e.trueResponsePhonemes) continue;
+    for (const pos of evaluateTrainingPositions(e.targetPhonemes, e.trueResponsePhonemes)) {
+      if (pos.type === "dialect") dialectCount++;
+      if (pos.type === "length") lengthCount++;
+    }
+  }
+
+  const headline =
+    pct === 100 ? "Ka rawe! Perfect scoring — every kupu right on the first attempt." :
+    pct >= 80   ? "Ka pai! Strong scoring accuracy." :
+    pct >= 50   ? "Good progress — keep practising." :
+                  "Keep at it — scoring accuracy builds with practice.";
+
+  let body = `<p class="tf-summary">${headline}</p>` +
+    `<div class="tf-row ok"><span class="tf-phon">${firstTry.length}/${total}</span><span>kupu scored correctly on the first attempt (${pct}%).</span></div>`;
+
+  if (retried.length) {
+    const items = retried.map(e => `${e.presentedWord} (${e.attempts} attempts)`).join(", ");
+    body += `<div class="tf-row note"><span class="tf-phon">${retried.length}</span><span>needed another listen: ${items}.</span></div>`;
+  }
+  if (revealed.length) {
+    const items = revealed.map(e => `${e.presentedWord}`).join(", ");
+    body += `<div class="tf-row bad"><span class="tf-phon">${revealed.length}</span><span>answer revealed: ${items} — worth replaying these in a future session.</span></div>`;
+  }
+  if (dialectCount || lengthCount) {
+    const bits = [];
+    if (dialectCount) bits.push(`${dialectCount} regional-variant phoneme${dialectCount !== 1 ? "s" : ""}`);
+    if (lengthCount) bits.push(`${lengthCount} vowel-length case${lengthCount !== 1 ? "s" : ""}`);
+    body += `<div class="tf-row note"><span class="tf-phon">📚</span><span class="tf-teach">This list included ${bits.join(" and ")} — these score as correct.</span></div>`;
+  }
+
+  const skipped = entries.filter(e => e.training && !e.trainingFile).length;
+  if (skipped) {
+    body += `<p class="hint">${skipped} kupu had no training recording and ${skipped !== 1 ? "were" : "was"} excluded from these figures.</p>`;
+  }
+
+  $("tsTitle").textContent = `Training summary — ${state.training.name}`;
+  $("tsBody").innerHTML = body;
+  dlg.addEventListener("close", () => finishListProceed(), { once: true });
+  dlg.showModal();
+  return true;
 }
 
 function abandonList() {

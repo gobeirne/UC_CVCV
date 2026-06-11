@@ -29,7 +29,7 @@
               <div class="card-header-row">
                 <h2>Client</h2>
                 <div class="training-controls">
-                  <button id="trainingBtn" type="button" class="secondary">🎓 Perform training</button>
+                  <button id="trainingBtn" type="button" class="secondary">🎓 Training mode…</button>
                   <select id="trainingClientSelect" hidden>
                     <option value="">Choose a training client…</option>
                   </select>
@@ -378,6 +378,16 @@
         <button id="tfRevealBtn" type="button" class="secondary" hidden>Use correct score &amp; continue</button>
         <button id="tfContinueBtn" type="button" hidden>Continue ▶</button>
         <button id="tfCloseBtn" value="cancel" class="secondary">Close</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="trainingSummaryDialog">
+    <form method="dialog" class="dialog-card">
+      <h2 id="tsTitle">Training summary</h2>
+      <div id="tsBody" class="tf-body"></div>
+      <menu>
+        <button id="tsContinueBtn" value="ok">Continue ▶</button>
       </menu>
     </form>
   </dialog>
