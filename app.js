@@ -449,7 +449,7 @@ async function openTrainingPicker() {
   btn.textContent = "Loading clients…";
   const profiles = await loadTrainingClients();
   btn.disabled = false;
-  btn.textContent = "🎓 Training mode…";
+  btn.textContent = "🎓 Perform training";
   if (!profiles.length) {
     alert(`No training clients found.\nAdd ClientXX.json profiles and response mp3s to the /${TRAINING_DIR} folder.`);
     return;
@@ -565,6 +565,20 @@ function ensureTrialTrainingVariant(trial) {
   trial.trainingAttempts = 0;
 }
 
+// Play just the target kupu, without chaining the training response
+// (used by the feedback dialog so kupu and response can be compared).
+async function playKupuOnly() {
+  const trial = currentTrial();
+  const q = currentQueueItem();
+  if (!trial || !q) return;
+  stopCurrentStimulusIfAny();
+  try {
+    await playFirstAvailable([trial.word[0]], $("stimEar").value, q.levelDbA, false);
+  } catch {
+    console.warn("Could not play kupu:", trial.word[0]);
+  }
+}
+
 async function playClientResponse() {
   const trial = currentTrial();
   if (!trainingActive() || !trial || !trial.trainingFile) return;
@@ -655,11 +669,18 @@ function handleTrainingNext() {
     }
   } else {
     trial.trainingAttempts = (trial.trainingAttempts || 0) + 1;
-    let body = `<p class="tf-summary">Not quite — you scored ${traineeScore}/4, the correct score is ${trueScore}/4.</p>`;
+    let body;
+    if (traineeScore === trueScore) {
+      // Total is right but the wrong positions are marked correct/incorrect
+      body = `<p class="tf-summary">Your total of ${trueScore}/4 is right, but you've marked the wrong phonemes as correct.</p>` +
+             `<p>Listen again — which sounds did the client actually get right?</p>`;
+    } else {
+      body = `<p class="tf-summary">Not quite — you scored ${traineeScore}/4, the correct score is ${trueScore}/4.</p>`;
+    }
     if (trial.trainingAttempts >= 2) {
       body += positions.map(describePosition).join("");
     } else {
-      body += `<p>Have another listen to the client's response and re-score before pressing Next.</p>`;
+      if (traineeScore !== trueScore) body += `<p>Have another listen to the client's response and re-score before pressing Next.</p>`;
       // Even on first miss, surface any teaching-moment positions
       const teach = positions.filter(p => p.type === "dialect" || p.type === "length");
       if (teach.length) body += teach.map(p => describePosition(p, positions.indexOf(p))).join("");
@@ -673,7 +694,8 @@ function showTrainingFeedback(title, bodyHtml, opts = {}) {
   if (!dlg) return;
   $("tfTitle").textContent = title;
   $("tfBody").innerHTML = bodyHtml;
-  $("tfListenBtn").hidden = !opts.listen;
+  $("tfPlayKupuBtn").hidden = !opts.listen;
+  $("tfPlayResponseBtn").hidden = !opts.listen;
   $("tfContinueBtn").hidden = !opts.continue;
   $("tfRevealBtn").hidden = !opts.reveal;
   $("tfCloseBtn").hidden = !!opts.continue; // when correct, Continue is the only exit
@@ -690,11 +712,8 @@ function bindEvents() {
   if ($("trainingBtn")) $("trainingBtn").onclick = openTrainingPicker;
   if ($("exitTrainingBtn")) $("exitTrainingBtn").onclick = exitTraining;
   if ($("replayResponseBtn")) $("replayResponseBtn").onclick = () => { stopCurrentStimulusIfAny(); playClientResponse(); };
-  if ($("tfListenBtn")) $("tfListenBtn").onclick = () => {
-    $("trainingFeedbackDialog").close();
-    stopCurrentStimulusIfAny();
-    playClientResponse();
-  };
+  if ($("tfPlayKupuBtn")) $("tfPlayKupuBtn").onclick = () => playKupuOnly();
+  if ($("tfPlayResponseBtn")) $("tfPlayResponseBtn").onclick = () => { stopCurrentStimulusIfAny(); playClientResponse(); };
   if ($("tfContinueBtn")) $("tfContinueBtn").onclick = () => {
     $("trainingFeedbackDialog").close();
     advanceTrainingTrial();

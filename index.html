@@ -26,14 +26,16 @@
           <div class="setup-main">
 
             <div class="card">
-              <h2>Client</h2>
-              <div class="training-controls">
-                <button id="trainingBtn" type="button" class="secondary">🎓 Training mode…</button>
-                <select id="trainingClientSelect" hidden>
-                  <option value="">Choose a training client…</option>
-                </select>
-                <span id="trainingBadge" class="training-badge" hidden></span>
-                <button id="exitTrainingBtn" type="button" class="secondary" hidden>Exit training</button>
+              <div class="card-header-row">
+                <h2>Client</h2>
+                <div class="training-controls">
+                  <button id="trainingBtn" type="button" class="secondary">🎓 Perform training</button>
+                  <select id="trainingClientSelect" hidden>
+                    <option value="">Choose a training client…</option>
+                  </select>
+                  <span id="trainingBadge" class="training-badge" hidden></span>
+                  <button id="exitTrainingBtn" type="button" class="secondary" hidden>Exit training</button>
+                </div>
               </div>
               <div class="grid two">
                 <label>Client name <input id="clientName" autocomplete="name" placeholder="Full name"></label>
@@ -371,7 +373,8 @@
       <h2 id="tfTitle">Feedback</h2>
       <div id="tfBody" class="tf-body"></div>
       <menu>
-        <button id="tfListenBtn" type="button" class="secondary">🔁 Listen again</button>
+        <button id="tfPlayKupuBtn" type="button" class="secondary" hidden>🔊 Kupu</button>
+        <button id="tfPlayResponseBtn" type="button" class="secondary" hidden>🔊 Response</button>
         <button id="tfRevealBtn" type="button" class="secondary" hidden>Use correct score &amp; continue</button>
         <button id="tfContinueBtn" type="button" hidden>Continue ▶</button>
         <button id="tfCloseBtn" value="cancel" class="secondary">Close</button>
@@ -381,14 +384,21 @@
 
   <style>
     /* Training mode additions (self-contained) */
+    .card-header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: .6rem;
+      flex-wrap: wrap;
+      margin-bottom: .4rem;
+    }
+    .card-header-row h2 { margin: 0; }
     .training-controls {
       display: flex;
       gap: .6rem;
       align-items: center;
       flex-wrap: wrap;
-      margin: .2rem 0 .7rem;
-      padding-bottom: .6rem;
-      border-bottom: 1px dashed var(--line, #dde0e4);
+      justify-content: flex-end;
     }
     .training-controls select { width: auto; min-width: 240px; margin-top: 0; }
     .training-badge {
