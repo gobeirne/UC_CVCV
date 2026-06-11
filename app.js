@@ -90,6 +90,8 @@ const state = {
   responseSelections: [null,null,null,null],
   _pendingAdvance: null,
   clinicLogo: null,
+  training: null,
+  _trainingBypass: false,
   audio: {
     ctx: null,
     masker: null,
@@ -137,6 +139,7 @@ function init() {
   renderRecentSessions();
   renderQueue();
   updateSetupResultsSummary();
+  updateTrainingBadge();
 }
 
 // ── Clinic settings (device-persistent, separate from session) ──
@@ -196,7 +199,8 @@ function saveSession() {
     currentListIndex: state.currentListIndex,
     currentTrialIndex: state.currentTrialIndex,
     currentTrials: state.currentTrials,
-    results: state.results
+    results: state.results,
+    training: state.training
   };
   localStorage.setItem(key, JSON.stringify(payload));
   renderRecentSessions();
@@ -290,7 +294,11 @@ function show(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
   $(id).classList.add("active");
   const sub = $("headerSubtitle");
-  if (sub) sub.textContent = SCREEN_SUBTITLES[id] || "Setup";
+  if (sub) {
+    let label = SCREEN_SUBTITLES[id] || "Setup";
+    if (trainingActive() && id !== "screen-report") label = `🎓 Training — ${label}`;
+    sub.textContent = label;
+  }
 }
 
 function readClientForm() {
@@ -346,6 +354,7 @@ function restoreSession() {
     drawPI();
     renderRecentSessions();
     updateSetupResultsSummary();
+    updateTrainingBadge();
   } catch { alert("Could not restore session — data may be corrupt."); }
 }
 
@@ -396,7 +405,312 @@ function cancelPendingAdvance() {
   }
 }
 
+/* ── Training mode ──────────────────────────────────────────────
+   Training client JSON profiles + response mp3s live in /training.
+   Filename format: ClientXX_word_c1_v1_c2_v2.mp3 (empty slot = omission).
+   The app plays the stimulus as normal, then the client's recorded
+   response; the trainee scores it and gets immediate feedback. */
+
+const TRAINING_DIR = "training";
+const ALL_WORDS = new Set(Object.values(WORD_LISTS).flat().map(w => w[0]));
+
+function trainingActive() { return !!state.training; }
+
+function parseTrainingFilename(filename) {
+  // ClientXX_word_s1_s2_s3_s4.mp3 → { word, response: [4] }; empty slot → "–"
+  const stem = filename.replace(/\.mp3$/i, "").replace(/\.wav$/i, "");
+  const parts = stem.split("_");
+  if (parts.length !== 6) return null;
+  const word = parts[1];
+  if (!ALL_WORDS.has(word)) return null;
+  const response = parts.slice(2, 6).map(s => (s === "" ? "–" : s));
+  return { word, response };
+}
+
+async function loadTrainingClients() {
+  // Probe training/Client01.json .. Client12.json; use whichever load.
+  const found = [];
+  for (let i = 1; i <= 12; i++) {
+    const id = `Client${String(i).padStart(2, "0")}`;
+    try {
+      const resp = await fetch(`${TRAINING_DIR}/${id}.json`);
+      if (!resp.ok) continue;
+      const profile = await resp.json();
+      if (profile && profile.id) found.push(profile);
+    } catch {}
+  }
+  return found;
+}
+
+async function openTrainingPicker() {
+  const sel = $("trainingClientSelect");
+  const btn = $("trainingBtn");
+  btn.disabled = true;
+  btn.textContent = "Loading clients…";
+  const profiles = await loadTrainingClients();
+  btn.disabled = false;
+  btn.textContent = "🎓 Training mode…";
+  if (!profiles.length) {
+    alert(`No training clients found.\nAdd ClientXX.json profiles and response mp3s to the /${TRAINING_DIR} folder.`);
+    return;
+  }
+  sel.innerHTML = `<option value="">Choose a training client…</option>`;
+  for (const p of profiles) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = `${p.id} — ${p.name || "unnamed"}${p.iwi ? " (" + p.iwi + ")" : ""}`;
+    opt._profile = p;
+    sel.appendChild(opt);
+  }
+  sel.hidden = false;
+  btn.hidden = true;
+  sel.onchange = () => {
+    const opt = sel.options[sel.selectedIndex];
+    if (opt && opt._profile) activateTrainingClient(opt._profile);
+  };
+}
+
+function activateTrainingClient(profile) {
+  // Index response files by word; warn on unparseable names.
+  const responsesByWord = {};
+  for (const f of profile.files || []) {
+    const parsed = parseTrainingFilename(f);
+    if (!parsed) { console.warn("Training file not parseable, skipped:", f); continue; }
+    (responsesByWord[parsed.word] = responsesByWord[parsed.word] || []).push({
+      filename: f, response: parsed.response
+    });
+  }
+
+  state.training = {
+    id: profile.id,
+    name: profile.name || profile.id,
+    age: profile.age ?? "",
+    iwi: profile.iwi || "",
+    notes: profile.notes || "",
+    dialectSubstitutions: profile.dialectSubstitutions || {},
+    responsesByWord
+  };
+
+  // Populate client fields — notes prime the trainee with iwi + variants
+  $("clientName").value = `${state.training.name} (TRAINING)`;
+  $("clientId").value = profile.id;
+  const dialectNotes = Object.entries(state.training.dialectSubstitutions)
+    .map(([t, d]) => d.message || `May use /${d.substitute}/ for /${t}/`)
+    .join(" ");
+  $("sessionNotes").value =
+    `TRAINING CLIENT — ${state.training.name}, age ${state.training.age}` +
+    (state.training.iwi ? `, iwi: ${state.training.iwi}` : "") +
+    `. ${state.training.notes}` +
+    (dialectNotes ? ` ${dialectNotes}` : "");
+
+  updateTrainingBadge();
+  saveSession();
+}
+
+function exitTraining() {
+  state.training = null;
+  $("clientName").value = "";
+  $("clientId").value = "";
+  $("sessionNotes").value = "";
+  $("trainingClientSelect").hidden = true;
+  $("trainingClientSelect").value = "";
+  $("trainingBtn").hidden = false;
+  updateTrainingBadge();
+  saveSession();
+}
+
+function updateTrainingBadge() {
+  const badge = $("trainingBadge");
+  const exitBtn = $("exitTrainingBtn");
+  const sel = $("trainingClientSelect");
+  const btn = $("trainingBtn");
+  if (!badge) return;
+  if (trainingActive()) {
+    badge.textContent = `🎓 Training: ${state.training.name} (${state.training.id})`;
+    badge.hidden = false;
+    exitBtn.hidden = false;
+    sel.hidden = true;
+    btn.hidden = true;
+  } else {
+    badge.hidden = true;
+    exitBtn.hidden = true;
+    btn.hidden = false;
+  }
+}
+
+// Dialect-aware equivalence: a substitution listed in the client's
+// dialect profile is correct wherever it occurs.
+function equivalentForScoring(target, response) {
+  if (equivalent(target, response)) return true;
+  if (trainingActive()) {
+    const sub = state.training.dialectSubstitutions?.[target];
+    if (sub && sub.substitute === response) return true;
+  }
+  return false;
+}
+
+function ensureTrialTrainingVariant(trial) {
+  // Pick one response variant at random per trial; keep it so replays
+  // and rescoring use the same recording.
+  if (!trainingActive() || !trial || trial.trainingFile !== undefined) return;
+  const variants = state.training.responsesByWord[trial.word[0]] || [];
+  if (!variants.length) {
+    trial.trainingFile = null; // explicitly: no recording for this kupu
+    trial.trainingResponse = null;
+    return;
+  }
+  const v = variants[Math.floor(Math.random() * variants.length)];
+  trial.trainingFile = v.filename;
+  trial.trainingResponse = v.response;
+  trial.trainingAttempts = 0;
+}
+
+async function playClientResponse() {
+  const trial = currentTrial();
+  if (!trainingActive() || !trial || !trial.trainingFile) return;
+  // Play the response binaurally at a clear, comfortable level:
+  // 65 dB(A) when calibrated, otherwise as recorded (unity gain).
+  const level = state.calibration.isCalibrated
+    ? Math.min(65, state.calibration.measuredDbA)
+    : 0;
+  try {
+    const node = await playFirstAvailable([`${TRAINING_DIR}/${trial.trainingFile}`], "binaural", level, false);
+    setStimulusIndicator(true, "Client response");
+    node.el.addEventListener("ended", () => {
+      if (!state.audio.activeStimuli.length) setStimulusIndicator(false);
+    }, { once: true });
+  } catch {
+    console.warn("Could not play training response:", trial.trainingFile);
+  }
+}
+
+// Per-position truth: how each response phoneme scores against the target.
+function evaluateTrainingPositions(targets, response) {
+  return targets.map((t, i) => {
+    const r = response[i];
+    if (!r || r === "–") return { target: t, response: r || "–", correct: false, type: "omission" };
+    if (t === r) return { target: t, response: r, correct: true, type: "exact" };
+    if (equivalent(t, r)) return { target: t, response: r, correct: true, type: "length" };
+    const sub = state.training?.dialectSubstitutions?.[t];
+    if (sub && sub.substitute === r) return { target: t, response: r, correct: true, type: "dialect", message: sub.message };
+    return { target: t, response: r, correct: false, type: "substitution" };
+  });
+}
+
+function describePosition(pos, idx) {
+  const n = idx + 1;
+  switch (pos.type) {
+    case "exact":
+      return `<div class="tf-row ok"><span class="tf-phon">${n}: /${pos.target}/</span><span>Correct.</span></div>`;
+    case "length":
+      return `<div class="tf-row ok"><span class="tf-phon">${n}: /${pos.target}/</span><span>The client said /${pos.response}/ — vowel-length differences are subtle and not penalised. Scores correct.</span></div>`;
+    case "dialect":
+      return `<div class="tf-row note"><span class="tf-phon">${n}: /${pos.target}/</span><span class="tf-teach">The client said /${pos.response}/. ${pos.message || "This is a valid regional variant."} Scores correct.</span></div>`;
+    case "omission":
+      return `<div class="tf-row bad"><span class="tf-phon">${n}: /${pos.target}/</span><span>The client omitted this sound — scores incorrect.</span></div>`;
+    default:
+      return `<div class="tf-row bad"><span class="tf-phon">${n}: /${pos.target}/</span><span>The client said /${pos.response}/ — a substitution, scores incorrect.</span></div>`;
+  }
+}
+
+function handleTrainingNext() {
+  const trial = currentTrial();
+  if (!trial) return;
+
+  // No recording for this kupu → behave like a normal trial.
+  if (!trial.trainingFile) { advanceTrainingTrial(); return; }
+
+  if (state.scoringMode === "none") {
+    showTrainingFeedback("Score first", `<p>Listen to the client's response and enter a score before continuing.</p>`, { listen: true });
+    return;
+  }
+
+  const targets = trial.word.slice(1, 5);
+  const positions = evaluateTrainingPositions(targets, trial.trainingResponse);
+  const trueScore = positions.filter(p => p.correct).length;
+  trial.trainingTrueScore = trueScore;
+  const traineeScore = computeCurrentScore();
+
+  // Per-position comparison when phoneme/advanced scoring was used.
+  let positionsMatch = true;
+  if (state.scoringMode !== "fast") {
+    positions.forEach((pos, i) => {
+      const transcribed = state.responseSelections[i];
+      const judged = (transcribed !== null && transcribed !== undefined && transcribed !== "")
+        ? equivalentForScoring(targets[i], transcribed)
+        : !!state.targetSelections[i];
+      if (judged !== pos.correct) positionsMatch = false;
+    });
+  }
+  const match = (traineeScore === trueScore) && positionsMatch;
+
+  if (match) {
+    trial.trainingMatched = true;
+    if (trueScore === 4) {
+      showTrainingFeedback("✓ Correct", `<p class="tf-summary">All four phonemes correct — 4/4.</p>`, { continue: true });
+    } else {
+      const detail = positions.map(describePosition).join("");
+      showTrainingFeedback(`✓ Correct — ${trueScore}/4`,
+        `<p class="tf-summary">You scored this correctly.</p>${detail}`, { continue: true });
+    }
+  } else {
+    trial.trainingAttempts = (trial.trainingAttempts || 0) + 1;
+    let body = `<p class="tf-summary">Not quite — you scored ${traineeScore}/4, the correct score is ${trueScore}/4.</p>`;
+    if (trial.trainingAttempts >= 2) {
+      body += positions.map(describePosition).join("");
+    } else {
+      body += `<p>Have another listen to the client's response and re-score before pressing Next.</p>`;
+      // Even on first miss, surface any teaching-moment positions
+      const teach = positions.filter(p => p.type === "dialect" || p.type === "length");
+      if (teach.length) body += teach.map(p => describePosition(p, positions.indexOf(p))).join("");
+    }
+    showTrainingFeedback("Have another listen", body, { listen: true, reveal: trial.trainingAttempts >= 2 });
+  }
+}
+
+function showTrainingFeedback(title, bodyHtml, opts = {}) {
+  const dlg = $("trainingFeedbackDialog");
+  if (!dlg) return;
+  $("tfTitle").textContent = title;
+  $("tfBody").innerHTML = bodyHtml;
+  $("tfListenBtn").hidden = !opts.listen;
+  $("tfContinueBtn").hidden = !opts.continue;
+  $("tfRevealBtn").hidden = !opts.reveal;
+  $("tfCloseBtn").hidden = !!opts.continue; // when correct, Continue is the only exit
+  dlg.showModal();
+}
+
+function advanceTrainingTrial() {
+  state._trainingBypass = true;
+  try { nextTrial(); } finally { state._trainingBypass = false; }
+}
+
 function bindEvents() {
+  // Training mode
+  if ($("trainingBtn")) $("trainingBtn").onclick = openTrainingPicker;
+  if ($("exitTrainingBtn")) $("exitTrainingBtn").onclick = exitTraining;
+  if ($("replayResponseBtn")) $("replayResponseBtn").onclick = () => { stopCurrentStimulusIfAny(); playClientResponse(); };
+  if ($("tfListenBtn")) $("tfListenBtn").onclick = () => {
+    $("trainingFeedbackDialog").close();
+    stopCurrentStimulusIfAny();
+    playClientResponse();
+  };
+  if ($("tfContinueBtn")) $("tfContinueBtn").onclick = () => {
+    $("trainingFeedbackDialog").close();
+    advanceTrainingTrial();
+  };
+  if ($("tfRevealBtn")) $("tfRevealBtn").onclick = () => {
+    // Accept the true score and move on (logged with attempts count)
+    const trial = currentTrial();
+    if (trial && Number.isFinite(trial.trainingTrueScore)) {
+      state.scoringMode = "fast";
+      state.trialScore = trial.trainingTrueScore;
+      markScoreButton();
+    }
+    $("trainingFeedbackDialog").close();
+    advanceTrainingTrial();
+  };
+
   // Calibration
   $("calibrateBtn").onclick = toggleCalibration;
   $("testCalBtn").onclick = testCalibratedSound;
@@ -498,6 +812,7 @@ function bindEvents() {
 
   document.addEventListener("keydown", (e) => {
     if (!$("screen-test").classList.contains("active")) return;
+    if (document.querySelector("dialog[open]")) return; // don't score/play behind dialogs
     const tag = document.activeElement.tagName;
     const inInput = ["INPUT","TEXTAREA","SELECT"].includes(tag);
 
@@ -1048,13 +1363,17 @@ function renderTrial() {
   const trial = currentTrial();
   const q = currentQueueItem();
   if (!trial || !q) return;
+  ensureTrialTrainingVariant(trial);
   const [word, c1, v1, c2, v2, translation] = trial.word;
   $("currentWord").innerHTML = `${word}<span class="kupu-translation">${translation}</span>`;
   const c = $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value;
-  $("currentMeta").innerHTML = `List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length} — <span class="condition-chip" title="Click to change condition">${conditionLabel(c)}</span>`;
+  const trainingTag = trainingActive() ? `🎓 ${state.training.name} — ` : "";
+  const noRecording = trainingActive() && !trial.trainingFile ? ` <b>(no training recording for this kupu)</b>` : "";
+  $("currentMeta").innerHTML = `${trainingTag}List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length} — <span class="condition-chip" title="Click to change condition">${conditionLabel(c)}</span>${noRecording}`;
   const conditionChip = $("currentMeta").querySelector(".condition-chip");
   if (conditionChip) conditionChip.onclick = openConditionDialog;
   if ($("phonemeHeading")) $("phonemeHeading").textContent = `Phoneme scoring - ${word}`;
+  if ($("replayResponseBtn")) $("replayResponseBtn").hidden = !(trainingActive() && trial.trainingFile);
   updateLevelDisplay();
   renderTargetPhonemes([c1,v1,c2,v2]);
   renderAdvanced([c1,v1,c2,v2]);
@@ -1292,7 +1611,7 @@ function equivalent(target, response) {
 }
 
 function computeAdvancedScore(targets, responses) {
-  return targets.reduce((sum, t, i) => sum + (equivalent(t, responses[i]) ? 1 : 0), 0);
+  return targets.reduce((sum, t, i) => sum + (equivalentForScoring(t, responses[i]) ? 1 : 0), 0);
 }
 
 function computeCurrentScore() {
@@ -1305,7 +1624,7 @@ function computeCurrentScore() {
   targets.forEach((target, idx) => {
     const advanced = state.responseSelections[idx];
     if (advanced !== null && advanced !== undefined && advanced !== "") {
-      if (equivalent(target, advanced)) score++;
+      if (equivalentForScoring(target, advanced)) score++;
     } else if (state.targetSelections[idx]) {
       score++;
     }
@@ -1332,8 +1651,8 @@ function renderSelectionColours() {
     }
 
     el.classList.toggle("selected", topSelected || advancedChosen);
-    el.classList.toggle("correct-selected", topSelected || (advancedChosen && equivalent(targets[idx], advanced)));
-    el.classList.toggle("incorrect-selected", advancedChosen && !equivalent(targets[idx], advanced));
+    el.classList.toggle("correct-selected", topSelected || (advancedChosen && equivalentForScoring(targets[idx], advanced)));
+    el.classList.toggle("incorrect-selected", advancedChosen && !equivalentForScoring(targets[idx], advanced));
   });
 
   document.querySelectorAll(".advanced-col").forEach((col, idx) => {
@@ -1343,12 +1662,12 @@ function renderSelectionColours() {
     col.querySelectorAll(".phoneme-option").forEach(btn => {
       const p = btn.textContent;
       const isChosen = explicitResponse === p;
-      const isTopSelected = state.scoringMode !== "fast" && !explicitResponse && state.targetSelections[idx] && equivalent(target, p);
-      const fastCorrect = fastAllCorrect && equivalent(target, p);
+      const isTopSelected = state.scoringMode !== "fast" && !explicitResponse && state.targetSelections[idx] && equivalentForScoring(target, p);
+      const fastCorrect = fastAllCorrect && equivalentForScoring(target, p);
 
       btn.classList.toggle("selected", isChosen);
-      btn.classList.toggle("correct-selected", (isChosen && equivalent(target, p)) || isTopSelected || fastCorrect);
-      btn.classList.toggle("incorrect-selected", isChosen && !equivalent(target, p));
+      btn.classList.toggle("correct-selected", (isChosen && equivalentForScoring(target, p)) || isTopSelected || fastCorrect);
+      btn.classList.toggle("incorrect-selected", isChosen && !equivalentForScoring(target, p));
     });
 
     // Colour the diphthong chip if present
@@ -1356,8 +1675,8 @@ function renderSelectionColours() {
     if (chip) {
       const isChosen = explicitResponse === chip.textContent;
       chip.classList.toggle("selected", isChosen);
-      chip.classList.toggle("correct-selected", isChosen && equivalent(target, chip.textContent));
-      chip.classList.toggle("incorrect-selected", isChosen && !equivalent(target, chip.textContent));
+      chip.classList.toggle("correct-selected", isChosen && equivalentForScoring(target, chip.textContent));
+      chip.classList.toggle("incorrect-selected", isChosen && !equivalentForScoring(target, chip.textContent));
     }
   });
 }
@@ -1395,12 +1714,29 @@ async function playCurrent(withCarrier) {
   const word = trial.word[0];
   const level = q.levelDbA;
   const ear = $("stimEar").value;
+
+  // In training mode, the client's recorded response follows the kupu.
+  const chainResponse = (kupuNode) => {
+    if (!trainingActive() || !trial.trainingFile) return;
+    kupuNode.el.addEventListener("ended", () => {
+      setTimeout(() => {
+        if ($("screen-test").classList.contains("active")) playClientResponse();
+      }, 600);
+    }, { once: true });
+  };
+
   try {
     if (withCarrier) {
       const carrier = await playFirstAvailable([pickKoreroMai()], ear, level, false);
-      carrier.el.addEventListener("ended", () => playFirstAvailable([word], ear, level, false), { once: true });
+      carrier.el.addEventListener("ended", async () => {
+        try {
+          const kupu = await playFirstAvailable([word], ear, level, false);
+          chainResponse(kupu);
+        } catch {}
+      }, { once: true });
     } else {
-      await playFirstAvailable([word], ear, level, false);
+      const kupu = await playFirstAvailable([word], ear, level, false);
+      chainResponse(kupu);
     }
   } catch {
     alert(`Could not play ${word}. Check the file exists in /sounds.`);
@@ -1415,12 +1751,12 @@ function setMaskerIndicator(isOn) {
   el.textContent = isOn ? "Masker playing" : "Masker off";
 }
 
-function setStimulusIndicator(isOn) {
+function setStimulusIndicator(isOn, label) {
   const el = $("stimulusStatus");
   if (!el) return;
   el.classList.toggle("on", !!isOn);
   el.classList.toggle("off", !isOn);
-  el.textContent = isOn ? "Kupu playing" : "Kupu idle";
+  el.textContent = isOn ? (label || "Kupu playing") : "Kupu idle";
 }
 
 function syncMaskerControls() {
@@ -1571,6 +1907,13 @@ function updateRunningScore() {
 }
 
 function nextTrial() {
+  // Training mode: evaluate the trainee's scoring before advancing.
+  if (trainingActive() && !state._trainingBypass) {
+    cancelPendingAdvance();
+    handleTrainingNext();
+    return;
+  }
+
   const trial = currentTrial();
   const q = currentQueueItem();
   if (!trial || !q) return;
@@ -1595,7 +1938,15 @@ function nextTrial() {
     score,
     percent: score * 25,
     maskerLevelReport: $("maskEar").value === "off" ? "none" : Number($("maskLevel").value),
-    comment: $("trialComment").value.trim()
+    comment: $("trialComment").value.trim(),
+    ...(trainingActive() ? {
+      training: true,
+      trainingClientId: state.training.id,
+      trainingFile: trial.trainingFile || null,
+      trueResponsePhonemes: trial.trainingResponse || null,
+      trueScore: Number.isFinite(trial.trainingTrueScore) ? trial.trainingTrueScore : null,
+      attempts: (trial.trainingAttempts || 0) + 1
+    } : {})
   };
 
   const existingIdx = state.currentResultIndexByTrial[state.currentTrialIndex];
