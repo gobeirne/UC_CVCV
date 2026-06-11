@@ -1,9 +1,9 @@
 {
   "id": "Client02",
-  "name": "Mere",
-  "age": 32,
-  "iwi": "Ngāti Whātua",
-  "notes": "Young adult female speaker, mixed accuracy",
+  "name": "Greg",
+  "age": 50,
+  "iwi": "Pākehā",
+  "notes": "",
   "dialectSubstitutions": {},
   "files": [
     "Client02_hapū_h_a_p_uː.mp3",
@@ -100,7 +100,7 @@
     "Client02_noho_n_o_h_o.mp3",
     "Client02_noke_n_o_h_o.mp3",
     "Client02_noke_n_o_k_e.mp3",
-    "Client02_nōku_n_oː_k_u.mp3",
+    "Client02_nōku_n_oː_k_o.mp3",
     "Client02_nōku_n_u_k_u.mp3",
     "Client02_nōna_n_oː_n_a.mp3",
     "Client02_pahi_p_a_h_i.mp3",
