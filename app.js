@@ -198,6 +198,7 @@ const state = {
   targetSelections: [false,false,false,false],
   responseSelections: [null,null,null,null],
   _pendingAdvance: null,
+  _advancing: false,
   clinicLogo: null,
   training: null,
   _trainingBypass: false,
@@ -511,6 +512,21 @@ function cancelPendingAdvance() {
   if (state._pendingAdvance) {
     clearTimeout(state._pendingAdvance);
     state._pendingAdvance = null;
+  }
+}
+
+// Brief, non-modal cue shown when a "Next" press is ignored because the
+// current trial has no score yet. Keeps the clinician from silently skipping.
+function flashNextLocked() {
+  const btn = $("nextTrialBtn");
+  if (btn) {
+    btn.classList.add("next-locked");
+    btn.textContent = (lang && lang().unit === "word") ? "Score this word first" : "Score this kupu first";
+    clearTimeout(state._nextLockTimer);
+    state._nextLockTimer = setTimeout(() => {
+      btn.classList.remove("next-locked");
+      btn.textContent = "Next";
+    }, 900);
   }
 }
 
@@ -1031,10 +1047,28 @@ function fileForWord(word) {
 }
 
 function candidatesForBase(base) {
-  // English bases are the NNNN_Word stem with no dB suffix — match exactly,
-  // and the file has no calibration suffix, so .wav/.mp3 fallbacks suffice.
+  // Māori bases are the word/known stem; match known files, then .wav/.mp3.
   const known = KNOWN_SOUND_FILES.filter(f => soundKey(f) === base).map(f => `sounds/${f}`);
   return [...known, `sounds/${base}.wav`, `sounds/${base}.mp3`];
+}
+
+// English stems are NNNN_Word (e.g. "0301_Pies"). The recordings are all .mp3,
+// but the word part is inconsistently cased across files (e.g. "0604_bell.mp3"
+// vs "0301_Pies.mp3"). To be robust on a case-sensitive host we try, in order:
+// the stem exactly as listed, then a Capitalised-word variant, then an
+// all-lowercase-word variant — deduped. Order = preference.
+function englishCandidates(stem) {
+  const m = /^(\d{4})_(.+)$/.exec(stem);
+  const stems = [stem];
+  if (m) {
+    const num = m[1], wRaw = m[2];
+    const cap = wRaw.charAt(0).toUpperCase() + wRaw.slice(1).toLowerCase();
+    const lower = wRaw.toLowerCase();
+    for (const variant of [`${num}_${cap}`, `${num}_${lower}`]) {
+      if (!stems.includes(variant)) stems.push(variant);
+    }
+  }
+  return stems.map(s => `${ENGLISH_SOUND_DIR}/${s}.mp3`);
 }
 
 function pickKoreroMai() {
@@ -1090,6 +1124,25 @@ async function playFirstAvailable(bases, ear, levelDbA, loop=false) {
   for (const base of bases) {
     const urls = base.includes("/") ? [base] : candidatesForBase(base);
     for (const url of urls) {
+      // Confirm the file actually exists before trying to play it. Probing with
+      // fetch makes the .wav→.mp3 fallback reliable (a missing extension is a
+      // clean 404 here, not an unreliable HTMLAudioElement play() rejection)
+      // and surfaces real case-sensitivity mismatches instead of masking them.
+      let exists = true;
+      try {
+        const resp = await fetch(url, { method: "HEAD" });
+        exists = resp.ok;
+      } catch {
+        // HEAD can be blocked (some static hosts); fall back to a ranged GET.
+        try {
+          const resp = await fetch(url, { headers: { Range: "bytes=0-0" } });
+          exists = resp.ok;
+        } catch (err) {
+          exists = false;
+          lastError = err;
+        }
+      }
+      if (!exists) continue;
       try {
         const node = createRoutedAudio(url, ear, levelDbA, loop);
         await node.el.play();
@@ -1881,11 +1934,11 @@ async function playCurrent(withCarrier) {
   if (!trial || !q) return;
   const L = lang();
   const word = trial.word[0];
-  // English resolves audio from sounds_cvc/ by its NNNN_Word file stem (col 4),
-  // trying .wav then .mp3; Māori resolves by the word from sounds/.
+  // English resolves audio from sounds_cvc/ by its NNNN_Word file stem (col 4).
+  // Recordings are all .mp3; word casing varies between files, so we try a few
+  // case variants. Māori resolves by the word from sounds/.
   const stem = trial.word[4] || word;
-  const englishBases = [`${ENGLISH_SOUND_DIR}/${stem}.wav`, `${ENGLISH_SOUND_DIR}/${stem}.mp3`];
-  const stimBases = L.hasCarrier ? [word] : englishBases;
+  const stimBases = L.hasCarrier ? [word] : englishCandidates(stem);
   const level = q.levelDbA;
   const ear = $("stimEar").value;
 
@@ -2094,9 +2147,36 @@ function nextTrial() {
     return;
   }
 
+  // Re-entrancy lockout: ignore a second advance while one is already running.
+  // This stops a manual "Next" tap from stacking on top of the auto-advance
+  // timer (or a double-tap) and skipping the trial in between.
+  if (state._advancing) return;
+
   const trial = currentTrial();
   const q = currentQueueItem();
   if (!trial || !q) return;
+
+  // Don't advance off an unscored trial. The auto-advance only fires *after*
+  // a score is entered, so this blocks only stray manual/double "Next" presses
+  // that would otherwise skip a trial and silently record it as 0.
+  // (Training bypass has already validated/recorded a score, so it's exempt.)
+  const alreadyHasResult = Number.isFinite(state.currentResultIndexByTrial[state.currentTrialIndex]);
+  if (!state._trainingBypass && state.scoringMode === "none" && !alreadyHasResult) {
+    flashNextLocked();
+    return;
+  }
+
+  state._advancing = true;
+  try {
+    advanceTrialNow(trial, q);
+  } finally {
+    state._advancing = false;
+  }
+}
+
+// The actual record-and-advance, separated so the lockout/guard logic above
+// stays readable.
+function advanceTrialNow(trial, q) {
   const targets = wordPhonemes(trial.word);
   const score = computeCurrentScore();
   const resultPayload = {

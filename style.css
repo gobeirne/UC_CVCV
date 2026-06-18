@@ -1071,3 +1071,15 @@ details summary {
     break-inside: avoid;
   }
 }
+
+
+/* Next button "score first" lockout cue */
+#nextTrialBtn.next-locked {
+  background: #8a6d00;
+  animation: nextLockShake .3s ease;
+}
+@keyframes nextLockShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
