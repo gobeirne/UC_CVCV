@@ -145,6 +145,7 @@ const LANGUAGES = {
     hasTranslation: true,
     hasAdvanced: true,      // advanced response-phoneme picker available
     hasTraining: true,
+    randomiseOrder: true,   // default: shuffle word order (fixed order not yet settled)
     unit: "kupu",           // singular term for the stimulus
     unitTitle: "Kupu"
   },
@@ -157,6 +158,7 @@ const LANGUAGES = {
     hasTranslation: false,
     hasAdvanced: false,     // phoneme tiles + comment only
     hasTraining: false,
+    randomiseOrder: false,  // default: present in listed order (CVC convention)
     unit: "word",
     unitTitle: "Word"
   }
@@ -171,6 +173,14 @@ function wordPhonemes(wordEntry) { return wordEntry.slice(1, 1 + phonemeCount())
 function blankSelections() { return Array(phonemeCount()).fill(false); }
 function blankResponses() { return Array(phonemeCount()).fill(null); }
 function pointsPerPhoneme() { return 100 / phonemeCount(); } // 25 (Māori) or 33.3 (English)
+
+// Whether word order should be shuffled for a language: a per-language override
+// wins if set, otherwise the language default. Defaults: Māori shuffled, English fixed.
+function randomiseEnabled(langKey = state.language) {
+  const ov = state.randomiseOverride?.[langKey];
+  if (ov === true || ov === false) return ov;
+  return !!(LANGUAGES[langKey] || LANGUAGES.maori).randomiseOrder;
+}
 
 const KNOWN_SOUND_FILES = [
 "hapū_+3.9dB.wav","hāte_-0.0dB.wav","hēki_+1.7dB.wav","heru_-1.3dB.wav","hine_-1.0dB.wav","hinu_-2.6dB.wav","hipi_+4.4dB.wav","honu_-2.5dB.wav","hope_+1.6dB.wav","huri_+0.6dB.wav","kaha_+3.2dB.wav","kare_-4.0dB.wav","keke_+1.5dB.wav","kēmu_-0.0dB.wav","kīngi_-2.1dB.wav","kino_-1.9dB.wav","koha_-2.2dB.wav","kohu_-2.7dB.wav","KōreroMai_01_+1.6dB.wav","KōreroMai_02_+2.2dB.wav","kupu_+1.7dB.wav","kurī_+0.2dB.wav","mangu_-2.2dB.wav","manu_-0.4dB.wav","mata_+1.1dB.wav","mihi_+1.9dB.wav","miro_-0.7dB.wav","mīti_+0.2dB.wav","mōku_+0.5dB.wav","moni_-1.1dB.wav","muku_-0.3dB.wav","mutu_-0.3dB.wav","nama_-0.2dB.wav","nāna_-2.1dB.wav","nēhi_-1.8dB.wav","neke_+4.0dB.wav","nēra_-1.1dB.wav","ngaki_+0.5dB.wav","ngako_+2.8dB.wav","ngaro_-3.9dB.wav","ngaru_-3.2dB.wav","ngata_+3.3dB.wav","ngāti_+2.0dB.wav","ngenge_-1.8dB.wav","ngeru_-1.8dB.wav","ngira_-2.8dB.wav","ngutu_+3.4dB.wav","niho_+2.1dB.wav","noho_+0.4dB.wav","noke_+1.6dB.wav","nōku_+2.3dB.wav","nōna_-1.7dB.wav","pahi_-0.9dB.wav","pāmu_-3.8dB.wav","papa_+2.5dB.wav","peka_-1.7dB.wav","pēpi_-1.4dB.wav","pere_-1.0dB.wav","piko_+0.6dB.wav","pipi_-1.5dB.wav","poto_+3.4dB.wav","pune_+0.5dB.wav","rama_-2.7dB.wav","rangi_+0.0dB.wav","rata_-4.2dB.wav","reka_-1.9dB.wav","rima_-2.3dB.wav","rimu_-1.9dB.wav","rōpū_+2.9dB.wav","roto_-0.3dB.wav","rūma_-1.6dB.wav","runga_+0.0dB.wav","take_+2.2dB.wav","tana_-2.7dB.wav","tāne_-1.7dB.wav","tangi_-1.1dB.wav","tapu_-0.8dB.wav","tēpu_+3.0dB.wav","tiki_+1.4dB.wav","tino_-2.0dB.wav","tiro_+4.9dB.wav","tuku_+4.8dB.wav","waha_+5.1dB.wav","wāhi_-6.1dB.wav","waho_-1.4dB.wav","waka_+0.4dB.wav","wehi_-0.3dB.wav","weka_-0.8dB.wav","wera_+0.4dB.wav","wētā_+0.9dB.wav","whana_-0.4dB.wav","whanga_-0.1dB.wav","whare_-3.2dB.wav","whata_-1.4dB.wav","whatu_+1.8dB.wav","whero_-2.5dB.wav","whetū_+2.2dB.wav","whiti_+3.0dB.wav","whitu_+3.9dB.wav","whiwhi_+4.4dB.wav","wiki_+0.0dB.wav","wiri_-1.7dB.wav"
@@ -199,6 +209,8 @@ const state = {
   responseSelections: [null,null,null,null],
   _pendingAdvance: null,
   _advancing: false,
+  // Per-language word-order override; null = use the language's default.
+  randomiseOverride: { maori: null, english: null },
   clinicLogo: null,
   training: null,
   _trainingBypass: false,
@@ -299,6 +311,7 @@ function saveSession() {
   const payload = {
     savedAt: new Date().toISOString(),
     language: state.language,
+    randomiseOverride: state.randomiseOverride,
     client: state.client,
     calibration: state.calibration,
     queue: state.queue,
@@ -447,6 +460,9 @@ function restoreSession() {
     const parsed = JSON.parse(saved);
     Object.assign(state, parsed);
     if (!LANGUAGES[state.language]) state.language = "maori";
+    if (!state.randomiseOverride || typeof state.randomiseOverride !== "object") {
+      state.randomiseOverride = { maori: null, english: null };
+    }
     applyLanguageToUI();
     // Repopulate client fields
     if (parsed.client) {
@@ -931,6 +947,16 @@ function bindEvents() {
   document.querySelectorAll(".language-btn").forEach(btn => {
     btn.onclick = () => setLanguage(btn.dataset.lang);
   });
+
+  // Word-order randomise override (per current language)
+  if ($("randomiseOrderToggle")) {
+    $("randomiseOrderToggle").onchange = (e) => {
+      if (!state.randomiseOverride) state.randomiseOverride = { maori: null, english: null };
+      state.randomiseOverride[state.language] = e.target.checked;
+      applyLanguageToUI();
+      saveSession();
+    };
+  }
 
   // Test screen
   $("playWordBtn").onclick = () => playCurrent(true);
@@ -1557,8 +1583,12 @@ function beginCurrentList() {
   }
   q.status = "in progress";
   state.firstTrialMaskerPrimed = false;
-  const lists = WORD_LISTS_FOR(q.language || "maori");
-  state.currentTrials = shuffle(lists[q.listNumber]).map((w, i) => ({ order: i + 1, word: w }));
+  const qLang = q.language || "maori";
+  const lists = WORD_LISTS_FOR(qLang);
+  // Shuffle only when randomisation is enabled for this language; otherwise
+  // present the words in their listed (file) order.
+  const words = randomiseEnabled(qLang) ? shuffle(lists[q.listNumber]) : lists[q.listNumber].slice();
+  state.currentTrials = words.map((w, i) => ({ order: i + 1, word: w }));
   state.currentResultIndexByTrial = {};
   state.currentTrialIndex = 0;
   renderQueue();
@@ -2427,6 +2457,15 @@ function applyLanguageToUI() {
   const trainingControls = document.querySelector(".training-controls");
   if (trainingControls) trainingControls.style.display = L.hasTraining ? "" : "none";
 
+  // Word-order randomise toggle reflects the current language's effective setting.
+  const rndToggle = $("randomiseOrderToggle");
+  if (rndToggle) {
+    rndToggle.checked = randomiseEnabled(state.language);
+    const usingDefault = (state.randomiseOverride?.[state.language] ?? null) === null;
+    const lbl = $("randomiseOrderLabel");
+    if (lbl) lbl.textContent = "Randomise word order" + (usingDefault ? ` (default: ${L.randomiseOrder ? "on" : "off"})` : "");
+  }
+
   repopulateListSelects();
   setupFastScoreButtons();
 }
@@ -2492,14 +2531,19 @@ function activePiLanguage() {
 function drawPiGlyph(ctx, px, py, condition, masked) {
   ctx.save();
   ctx.font = "bold 22px system-ui";
+  ctx.textBaseline = "middle";
   if (condition === "left") {
     ctx.fillStyle = "#135bd8";
     if (masked) {
-      // Masked left: two ×'s overlapping horizontally (a "double-x").
-      ctx.fillText("×", px - 11, py + 7);
-      ctx.fillText("×", px - 3, py + 7);
+      // Masked left: two ×'s overlapping by 50% of the glyph width, centred on px.
+      ctx.textAlign = "center";
+      const w = ctx.measureText("×").width;
+      const off = w * 0.25; // each × shifted a quarter-width from centre → 50% overlap
+      ctx.fillText("×", px - off, py);
+      ctx.fillText("×", px + off, py);
     } else {
-      ctx.fillText("×", px - 7, py + 7);
+      ctx.textAlign = "center";
+      ctx.fillText("×", px, py);
     }
   } else if (condition === "right") {
     ctx.strokeStyle = "#c52222";
@@ -2511,7 +2555,8 @@ function drawPiGlyph(ctx, px, py, condition, masked) {
     else ctx.stroke();        // unmasked right: open circle
   } else {
     ctx.fillStyle = "#111";
-    ctx.fillText(conditionSymbol(condition), px - 7, py + 7);
+    ctx.textAlign = "center";
+    ctx.fillText(conditionSymbol(condition), px, py);
   }
   ctx.restore();
 }

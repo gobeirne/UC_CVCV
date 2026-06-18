@@ -1083,3 +1083,21 @@ details summary {
   25% { transform: translateX(-3px); }
   75% { transform: translateX(3px); }
 }
+
+
+/* Word-order randomise toggle in the language selector banner */
+.randomise-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  margin: 0;
+  font-weight: 600;
+  color: #33415c;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.randomise-toggle input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
