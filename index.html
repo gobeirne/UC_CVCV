@@ -51,6 +51,14 @@
 
             <div class="card">
               <h2>Test configuration</h2>
+              <div class="language-selector">
+                <span class="language-selector-label">Test language</span>
+                <div class="language-toggle" role="tablist">
+                  <button type="button" id="langMaoriBtn" class="language-btn active" data-lang="maori">Te reo Māori</button>
+                  <button type="button" id="langEnglishBtn" class="language-btn" data-lang="english">NZ English</button>
+                </div>
+                <span class="language-selector-hint inline-hint">Lists added to the queue are tagged with the language selected now. You can switch between lists.</span>
+              </div>
               <div class="grid three">
                 <label>Presentation condition
                   <select id="presentationCondition">
@@ -246,7 +254,7 @@
 
             <div class="phoneme-heading"><h3 id="phonemeHeading">Phoneme scoring</h3></div>
             <div id="targetPhonemes" class="phoneme-row"></div>
-            <details>
+            <details id="advancedDetails">
               <summary>Advanced response phoneme selection</summary>
               <div id="advancedColumns" class="advanced-grid"></div>
             </details>
@@ -266,11 +274,17 @@
             <div id="trialNavigator" class="trial-navigator"></div>
 
             <h3>Performance intensity</h3>
+            <div id="piTabs" class="pi-tabs" hidden></div>
             <canvas id="piCanvas" width="420" height="300"></canvas>
             <div class="legend">
               <span><b class="blue">×</b> Left</span>
               <span><b class="red">○</b> Right</span>
               <span><b>B</b> Binaural</span><span><b>S/A/U</b> SF/Aided/Unaided</span>
+            </div>
+            <div class="legend legend-masked">
+              <span><b class="blue">××</b> Masked left</span>
+              <span><b class="red">●</b> Masked right</span>
+              <span>Left dashed · Right solid</span>
             </div>
             <h3>Exports</h3>
             <div class="actions stack">

@@ -4,7 +4,7 @@
    trying the known filename first, then .mp3/.wav alternatives.
 */
 
-const WORD_LISTS = {
+const MAORI_WORD_LISTS = {
   1: [
     ["hēki","h","eː","k","i","egg"],
     ["keke","k","e","k","e","cake"],
@@ -64,6 +64,114 @@ const WORD_LISTS = {
   ]
 };
 
+/* ── NZ English CVC lists ─────────────────────────────────────────
+   Word entry shape: [word, c1, v, c2, fileBase]
+   - 3 phonemes per word (C V C).
+   - fileBase is the NNNN_Word stem; audio resolves by that exact stem.
+   - No translation column, no carrier (carrier is embedded in the file).
+   The list/item number lives in the filename: NN(list)NN(item). */
+const ENGLISH_WORD_LISTS = {
+  1: [
+    ["pass","p","a","ss","0101_Pass"],["rule","r","u","le","0102_Rule"],["cause","c","au","se","0103_Cause"],
+    ["time","t","i","me","0104_Time"],["log","l","o","g","0105_Log"],["sick","s","i","ck","0106_Sick"],
+    ["mean","m","ea","n","0107_Mean"],["bed","b","e","d","0108_Bed"],["hope","h","o","pe","0109_Hope"],["date","d","a","te","0110_Date"]
+  ],
+  2: [
+    ["hall","h","a","ll","0201_Hall"],["come","c","o","me","0202_Come"],["bag","b","a","g","0203_Bag"],
+    ["rose","r","o","se","0204_Rose"],["suit","s","ui","t","0205_Suit"],["made","m","a","de","0206_Made"],
+    ["like","l","i","ke","0207_Like"],["peace","p","ea","ce","0208_Peace"],["dip","d","i","p","0209_Dip"],["ten","t","e","n","0210_Ten"]
+  ],
+  3: [
+    ["pies","p","ie","s","0301_Pies"],["mock","m","o","ck","0302_Mock"],["room","r","oo","m","0303_Room"],
+    ["dad","d","a","d","0304_Dad"],["loan","l","oa","n","0305_Loan"],["beg","b","e","g","0306_Beg"],
+    ["tell","t","e","ll","0307_Tell"],["keep","k","ee","p","0308_Keep"],["hiss","h","i","ss","0309_Hiss"],["sought","s","ough","t","0310_Sought"]
+  ],
+  4: [
+    ["boss","b","o","ss","0401_Boss"],["sip","s","i","p","0402_Sip"],["pal","p","a","l","0403_Pal"],
+    ["coat","c","oa","t","0404_Coat"],["rod","r","o","d","0405_Rod"],["moon","m","oo","n","0406_Moon"],
+    ["hem","h","e","m","0407_Hem"],["take","t","a","ke","0408_Take"],["league","l","ea","gue","0409_League"],["dies","d","ie","s","0410_Dies"]
+  ],
+  5: [
+    ["time","t","i","me","0501_Time"],["caught","c","augh","t","0502_Caught"],["beg","b","e","g","0503_Beg"],
+    ["rid","r","i","d","0504_Rid"],["loon","l","oo","n","0505_Loon"],["mop","m","o","p","0506_Mop"],
+    ["doze","d","o","ze","0507_Doze"],["says","s","ay","s","0508_Says"],["pack","p","a","ck","0509_Pack"],["heel","h","ee","l","0510_Heel"]
+  ],
+  6: [
+    ["make","m","a","ke","0601_Make"],["laws","l","aw","s","0602_Laws"],["rice","r","i","ce","0603_Rice"],
+    ["bell","b","e","ll","0604_bell"],["tote","t","o","te","0605_Tote"],["cod","c","o","d","0606_Cod"],
+    ["ham","h","a","m","0607_Ham"],["deep","d","ee","p","0608_Deep"],["pig","p","i","g","0609_Pig"],["soon","s","oo","n","0610_Soon"]
+  ],
+  7: [
+    ["seal","s","ea","l","0701_Seal"],["dawn","d","aw","n","0702_Dawn"],["boom","b","oo","m","0703_Boom"],
+    ["hog","h","o","g","0704_Hog"],["toes","t","oe","s","0705_Toes"],["mid","m","i","d","0706_Mid"],
+    ["cat","c","a","t","0707_Cat"],["like","l","i","ke","0708_Like"],["pep","p","e","p","0709_Pep"],["race","r","a","ce","0710_Race"]
+  ],
+  8: [
+    ["hide","h","i","de","0801_Hide"],["tame","t","a","me","0802_Tame"],["rule","r","u","le","0803_Rule"],
+    ["cause","c","au","se","0804_Cause"],["big","b","i","g","0805_Big"],["sass","s","a","ss","0806_Sass"],
+    ["pope","p","o","pe","0807_Pope"],["don","d","o","n","0808_Don"],["meek","m","ee","k","0809_Meek"],["let","l","e","t","0810_Let"]
+  ],
+  9: [
+    ["call","c","a","ll","0901_Call"],["buys","b","uy","s","0902_Buys"],["same","s","a","me","0903_Same"],
+    ["miss","m","i","ss","0904_Miss"],["rot","r","o","t","0905_Rot"],["hoop","h","oo","p","0906_Hoop"],
+    ["load","l","oa","d","0907_Load"],["peck","p","e","ck","0908_Peck"],["tag","t","a","g","0909_Tag"],["dean","d","ea","n","0910_Dean"]
+  ],
+  10: [
+    ["lean","l","ea","n","1001_Lean"],["hag","h","a","g","1002_Hag"],["bed","b","e","d","1003_Bed"],
+    ["sews","s","ew","s","1004_Sews"],["cop","c","o","p","1005_Cop"],["root","r","oo","t","1006_Root"],
+    ["pick","p","i","ck","1007_Pick"],["maim","m","ai","m","1008_Maim"],["toss","t","o","ss","1009_Toss"],["dial","d","ia","l","1010_Dial"]
+  ],
+  11: [
+    ["lice","l","i","ce","1101_Lice"],["mall","m","a","ll","1102_Mall"],["tomb","t","o","mb","1103_Tomb"],
+    ["bag","b","a","g","1104_Bag"],["soap","s","oa","p","1105_Soap"],["rake","r","a","ke","1106_Rake"],
+    ["pen","p","e","n","1107_Pen"],["keys","k","ey","s","1108_Keys"],["hid","h","i","d","1109_Hid"],["dot","d","o","t","1110_Dot"]
+  ],
+  12: [
+    ["dike","d","i","ke","1201_Dike"],["ball","b","a","ll","1202_Ball"],["mace","m","a","ce","1203_Mace"],
+    ["rig","r","i","g","1204_Rig"],["lose","l","o","se","1205_Lose"],["sop","s","o","p","1206_Sop"],
+    ["comb","c","o","mb","1207_Comb"],["ten","t","e","n","1208_Ten"],["pad","p","a","d","1209_Pad"],["heat","h","ea","t","1210_Heat"]
+  ]
+};
+
+/* Per-language configuration. Everything language-specific is derived
+   from here so the rest of the app stays count-agnostic. */
+const LANGUAGES = {
+  maori: {
+    key: "maori",
+    label: "Te reo Māori",
+    lists: MAORI_WORD_LISTS,
+    phonemeCount: 4,        // C V C V
+    hasCarrier: true,       // separate KōreroMai carrier file
+    hasTranslation: true,
+    hasAdvanced: true,      // advanced response-phoneme picker available
+    hasTraining: true,
+    unit: "kupu",           // singular term for the stimulus
+    unitTitle: "Kupu"
+  },
+  english: {
+    key: "english",
+    label: "NZ English",
+    lists: ENGLISH_WORD_LISTS,
+    phonemeCount: 3,        // C V C
+    hasCarrier: false,      // carrier embedded in the stimulus file
+    hasTranslation: false,
+    hasAdvanced: false,     // phoneme tiles + comment only
+    hasTraining: false,
+    unit: "word",
+    unitTitle: "Word"
+  }
+};
+
+function lang() { return LANGUAGES[state.language] || LANGUAGES.maori; }
+function WORD_LISTS_FOR(langKey) { return (LANGUAGES[langKey] || LANGUAGES.maori).lists; }
+function currentWordLists() { return lang().lists; }
+function phonemeCount() { return lang().phonemeCount; }
+// Phoneme columns of a word entry, regardless of language (skips the word itself).
+function wordPhonemes(wordEntry) { return wordEntry.slice(1, 1 + phonemeCount()); }
+function blankSelections() { return Array(phonemeCount()).fill(false); }
+function blankResponses() { return Array(phonemeCount()).fill(null); }
+function pointsPerPhoneme() { return 100 / phonemeCount(); } // 25 (Māori) or 33.3 (English)
+
 const KNOWN_SOUND_FILES = [
 "hapū_+3.9dB.wav","hāte_-0.0dB.wav","hēki_+1.7dB.wav","heru_-1.3dB.wav","hine_-1.0dB.wav","hinu_-2.6dB.wav","hipi_+4.4dB.wav","honu_-2.5dB.wav","hope_+1.6dB.wav","huri_+0.6dB.wav","kaha_+3.2dB.wav","kare_-4.0dB.wav","keke_+1.5dB.wav","kēmu_-0.0dB.wav","kīngi_-2.1dB.wav","kino_-1.9dB.wav","koha_-2.2dB.wav","kohu_-2.7dB.wav","KōreroMai_01_+1.6dB.wav","KōreroMai_02_+2.2dB.wav","kupu_+1.7dB.wav","kurī_+0.2dB.wav","mangu_-2.2dB.wav","manu_-0.4dB.wav","mata_+1.1dB.wav","mihi_+1.9dB.wav","miro_-0.7dB.wav","mīti_+0.2dB.wav","mōku_+0.5dB.wav","moni_-1.1dB.wav","muku_-0.3dB.wav","mutu_-0.3dB.wav","nama_-0.2dB.wav","nāna_-2.1dB.wav","nēhi_-1.8dB.wav","neke_+4.0dB.wav","nēra_-1.1dB.wav","ngaki_+0.5dB.wav","ngako_+2.8dB.wav","ngaro_-3.9dB.wav","ngaru_-3.2dB.wav","ngata_+3.3dB.wav","ngāti_+2.0dB.wav","ngenge_-1.8dB.wav","ngeru_-1.8dB.wav","ngira_-2.8dB.wav","ngutu_+3.4dB.wav","niho_+2.1dB.wav","noho_+0.4dB.wav","noke_+1.6dB.wav","nōku_+2.3dB.wav","nōna_-1.7dB.wav","pahi_-0.9dB.wav","pāmu_-3.8dB.wav","papa_+2.5dB.wav","peka_-1.7dB.wav","pēpi_-1.4dB.wav","pere_-1.0dB.wav","piko_+0.6dB.wav","pipi_-1.5dB.wav","poto_+3.4dB.wav","pune_+0.5dB.wav","rama_-2.7dB.wav","rangi_+0.0dB.wav","rata_-4.2dB.wav","reka_-1.9dB.wav","rima_-2.3dB.wav","rimu_-1.9dB.wav","rōpū_+2.9dB.wav","roto_-0.3dB.wav","rūma_-1.6dB.wav","runga_+0.0dB.wav","take_+2.2dB.wav","tana_-2.7dB.wav","tāne_-1.7dB.wav","tangi_-1.1dB.wav","tapu_-0.8dB.wav","tēpu_+3.0dB.wav","tiki_+1.4dB.wav","tino_-2.0dB.wav","tiro_+4.9dB.wav","tuku_+4.8dB.wav","waha_+5.1dB.wav","wāhi_-6.1dB.wav","waho_-1.4dB.wav","waka_+0.4dB.wav","wehi_-0.3dB.wav","weka_-0.8dB.wav","wera_+0.4dB.wav","wētā_+0.9dB.wav","whana_-0.4dB.wav","whanga_-0.1dB.wav","whare_-3.2dB.wav","whata_-1.4dB.wav","whatu_+1.8dB.wav","whero_-2.5dB.wav","whetū_+2.2dB.wav","whiti_+3.0dB.wav","whitu_+3.9dB.wav","whiwhi_+4.4dB.wav","wiki_+0.0dB.wav","wiri_-1.7dB.wav"
 ];
@@ -75,6 +183,7 @@ const PHONEMES = {
 const V_EQ = { "a":"a","aː":"a","e":"e","eː":"e","i":"i","iː":"i","o":"o","oː":"o","u":"u","uː":"u" };
 
 const state = {
+  language: "maori",
   client: {},
   calibration: { measuredDbA: null, timestamp: null, isCalibrated: false, sliderMinDb: -100, sliderMaxDb: 0, currentSliderDb: 0 },
   queue: [],
@@ -122,18 +231,13 @@ function conditionLabel(condition) {
 
 function init() {
   $("sessionDate").value = new Date().toISOString().slice(0,10);
-  for (let i = 1; i <= 10; i++) {
-    const opt = document.createElement("option");
-    opt.value = String(i);
-    opt.textContent = `List ${i}`;
-    $("listChoice").appendChild(opt);
-    if ($("queueListNumber")) $("queueListNumber").appendChild(opt.cloneNode(true));
-  }
+  repopulateListSelects();
   loadClinicSettings();
   loadDraftIntoForm();
   bindEvents();
+  applyLanguageToUI();
   setupCalibrationSlider();
-  drawPI();
+  refreshPI();
   if ($("maskingEnabled")) updateMaskingEnabled();
   offerStoredCalibration();
   renderRecentSessions();
@@ -193,6 +297,7 @@ function saveSession() {
   const key = "ucTeReoSpeechAudiometry";
   const payload = {
     savedAt: new Date().toISOString(),
+    language: state.language,
     client: state.client,
     calibration: state.calibration,
     queue: state.queue,
@@ -231,6 +336,7 @@ function openSavedJson(e) {
       if (data.calibration) state.calibration = data.calibration;
       if (data.queue)       state.queue = data.queue;
       if (data.results)     state.results = data.results;
+      if (data.language && LANGUAGES[data.language]) { state.language = data.language; applyLanguageToUI(); }
       // Repopulate client fields
       $("clientName").value = state.client?.name || "";
       $("clientId").value   = state.client?.id   || "";
@@ -238,7 +344,7 @@ function openSavedJson(e) {
       $("sessionDate").value = state.client?.date || $("sessionDate").value;
       $("sessionNotes").value = state.client?.notes || "";
       renderQueue();
-      drawPI();
+      refreshPI();
       updateSetupResultsSummary();
       renderRecentSessions();
       alert(`Loaded ${state.results.length} results for ${state.client?.name || "unknown client"}.`);
@@ -339,6 +445,8 @@ function restoreSession() {
   try {
     const parsed = JSON.parse(saved);
     Object.assign(state, parsed);
+    if (!LANGUAGES[state.language]) state.language = "maori";
+    applyLanguageToUI();
     // Repopulate client fields
     if (parsed.client) {
       $("clientName").value = parsed.client.name || "";
@@ -351,7 +459,7 @@ function restoreSession() {
     if (state.calibration?.isCalibrated) $("testCalBtn").hidden = false;
     syncMaskerControls();
     renderQueue();
-    drawPI();
+    refreshPI();
     renderRecentSessions();
     updateSetupResultsSummary();
     updateTrainingBadge();
@@ -362,7 +470,8 @@ function setupFastScoreButtons() {
   const box = document.querySelector(".score-buttons");
   if (!box) return;
   box.innerHTML = "";
-  for (let i = 0; i <= 4; i++) {
+  const max = phonemeCount();
+  for (let i = 0; i <= max; i++) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.dataset.score = String(i);
@@ -379,8 +488,8 @@ function setupFastScoreButtons() {
 function fastScore(score) {
   state.scoringMode = "fast";
   state.trialScore = score;
-  state.targetSelections = [false,false,false,false];
-  state.responseSelections = [null,null,null,null];
+  state.targetSelections = blankSelections();
+  state.responseSelections = blankResponses();
   markScoreButton();
   renderSelectionColours();
   schedulePendingAdvance();
@@ -412,7 +521,8 @@ function cancelPendingAdvance() {
    response; the trainee scores it and gets immediate feedback. */
 
 const TRAINING_DIR = "training";
-const ALL_WORDS = new Set(Object.values(WORD_LISTS).flat().map(w => w[0]));
+const ENGLISH_SOUND_DIR = "sounds_cvc";
+const ALL_WORDS = new Set(Object.values(MAORI_WORD_LISTS).flat().map(w => w[0]));
 
 function trainingActive() { return !!state.training; }
 
@@ -801,6 +911,11 @@ function bindEvents() {
   if ($("conditionSaveBtn")) $("conditionSaveBtn").onclick = saveConditionDialog;
   if ($("trialEditSaveBtn")) $("trialEditSaveBtn").onclick = saveTrialEditDialog;
 
+  // Language selector
+  document.querySelectorAll(".language-btn").forEach(btn => {
+    btn.onclick = () => setLanguage(btn.dataset.lang);
+  });
+
   // Test screen
   $("playWordBtn").onclick = () => playCurrent(true);
   $("repeatWordBtn").onclick = () => playCurrent(false);
@@ -836,8 +951,8 @@ function bindEvents() {
     const tag = document.activeElement.tagName;
     const inInput = ["INPUT","TEXTAREA","SELECT"].includes(tag);
 
-    // 0–4: fast score + auto-advance (600ms window for nav click interception)
-    if (["0","1","2","3","4"].includes(e.key) && !inInput) {
+    // 0–N: fast score + auto-advance (600ms window for nav click interception)
+    if (/^[0-9]$/.test(e.key) && Number(e.key) <= phonemeCount() && !inInput) {
       e.preventDefault();
       fastScore(Number(e.key));
       return;
@@ -916,6 +1031,8 @@ function fileForWord(word) {
 }
 
 function candidatesForBase(base) {
+  // English bases are the NNNN_Word stem with no dB suffix — match exactly,
+  // and the file has no calibration suffix, so .wav/.mp3 fallbacks suffice.
   const known = KNOWN_SOUND_FILES.filter(f => soundKey(f) === base).map(f => `sounds/${f}`);
   return [...known, `sounds/${base}.wav`, `sounds/${base}.mp3`];
 }
@@ -1193,7 +1310,7 @@ function saveConditionDialog() {
     $("presentationCondition").value = $("conditionEditSelect").value;
     updatePresentationConditionRouting();
     renderQueue();
-    drawPI();
+    refreshPI();
     saveSession();
   }
   $("conditionDialog").close();
@@ -1204,7 +1321,19 @@ function openTrialEdit(resultIndex) {
   if (!r || !$("trialEditDialog")) return;
   $("trialEditResultIndex").value = String(resultIndex);
   $("trialEditTitle").textContent = `Edit ${r.presentedWord}`;
-  $("trialEditScore").value = String(r.score ?? 0);
+  // Rebuild the score options to match this result's phoneme count.
+  const denom = r.phonemeCount || r.targetPhonemes?.length || 4;
+  const sel = $("trialEditScore");
+  if (sel) {
+    sel.innerHTML = "";
+    for (let i = 0; i <= denom; i++) {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `${i}/${denom}`;
+      sel.appendChild(opt);
+    }
+    sel.value = String(r.score ?? 0);
+  }
   $("trialEditComment").value = r.comment || "";
   $("trialEditDialog").showModal();
 }
@@ -1212,14 +1341,16 @@ function openTrialEdit(resultIndex) {
 function saveTrialEditDialog() {
   const idx = Number($("trialEditResultIndex").value);
   if (!Number.isFinite(idx) || !state.results[idx]) return;
-  state.results[idx].score = Number($("trialEditScore").value);
-  state.results[idx].scoringMode = "edited-numeric";
-  state.results[idx].responsePhonemes = [null,null,null,null];
-  state.results[idx].selectedTargetCorrectness = [false,false,false,false];
-  state.results[idx].percent = state.results[idx].score * 25;
-  state.results[idx].comment = $("trialEditComment").value.trim();
+  const r = state.results[idx];
+  const denom = r.phonemeCount || r.targetPhonemes?.length || 4;
+  r.score = Number($("trialEditScore").value);
+  r.scoringMode = "edited-numeric";
+  r.responsePhonemes = Array(denom).fill(null);
+  r.selectedTargetCorrectness = Array(denom).fill(false);
+  r.percent = Math.round((r.score / denom) * 100);
+  r.comment = $("trialEditComment").value.trim();
   saveSession();
-  drawPI();
+  refreshPI();
   renderTrialNavigator();
   $("trialEditDialog").close();
 }
@@ -1234,21 +1365,23 @@ function updatePresentationConditionRouting() {
 
 function addList(listNumber, level) {
   if (!listNumber || !level) return;
-  state.queue.push({ listNumber, levelDbA: level, status: "queued", id: crypto.randomUUID?.() || String(Date.now()+Math.random()) });
+  state.queue.push({ listNumber, levelDbA: level, language: state.language, status: "queued", id: crypto.randomUUID?.() || String(Date.now()+Math.random()) });
   renderQueue();
   saveSession();
 }
 
 function addRandomList(level) {
-  const allLists = Object.keys(WORD_LISTS).map(Number);
+  const allLists = Object.keys(currentWordLists()).map(Number);
   let pool = allLists;
 
-  // Do not duplicate a list while the queue contains fewer than 10 list entries.
-  // Once the clinician adds more than 10 entries, repeats are unavoidable and allowed.
-  if (state.queue.length < allLists.length) {
-    const used = new Set(state.queue.map(q => q.listNumber));
+  // Do not duplicate a list (within the current language) while the queue
+  // contains fewer entries than there are lists. Repeats allowed beyond that.
+  const sameLang = state.queue.filter(q => (q.language || "maori") === state.language);
+  if (sameLang.length < allLists.length) {
+    const used = new Set(sameLang.map(q => q.listNumber));
     pool = allLists.filter(n => !used.has(n));
   }
+  if (!pool.length) pool = allLists;
 
   const n = pool[Math.floor(Math.random() * pool.length)];
   addList(n, level);
@@ -1269,7 +1402,7 @@ function renderQueue() {
     chip.className = "chip queue-chip" + (idx === state.currentListIndex ? " current" : "");
     chip.draggable = true;
     chip.dataset.index = String(idx);
-    chip.innerHTML = `List ${q.listNumber} @ ${q.levelDbA} dB(A) — ${q.status} <span class="queue-arrows">↕</span>`;
+    chip.innerHTML = `<span class="queue-lang-tag ${(q.language||'maori')}">${(LANGUAGES[q.language||'maori']||LANGUAGES.maori).label}</span> List ${q.listNumber} @ ${q.levelDbA} dB(A) — ${q.status} <span class="queue-arrows">↕</span>`;
     chip.onclick = () => openQueueDialog(idx);
 
     chip.addEventListener("dragstart", e => {
@@ -1364,9 +1497,15 @@ function shuffle(arr) {
 function beginCurrentList() {
   const q = state.queue[state.currentListIndex];
   if (!q) return showReport();
+  // Follow the list's language so scoring, terminology and the carrier behave correctly.
+  if (q.language && q.language !== state.language) {
+    state.language = q.language;
+    applyLanguageToUI();
+  }
   q.status = "in progress";
   state.firstTrialMaskerPrimed = false;
-  state.currentTrials = shuffle(WORD_LISTS[q.listNumber]).map((w, i) => ({ order: i + 1, word: w }));
+  const lists = WORD_LISTS_FOR(q.language || "maori");
+  state.currentTrials = shuffle(lists[q.listNumber]).map((w, i) => ({ order: i + 1, word: w }));
   state.currentResultIndexByTrial = {};
   state.currentTrialIndex = 0;
   renderQueue();
@@ -1383,20 +1522,23 @@ function renderTrial() {
   const trial = currentTrial();
   const q = currentQueueItem();
   if (!trial || !q) return;
+  const L = lang();
   ensureTrialTrainingVariant(trial);
-  const [word, c1, v1, c2, v2, translation] = trial.word;
-  $("currentWord").innerHTML = `${word}<span class="kupu-translation">${translation}</span>`;
+  const word = trial.word[0];
+  const phonemes = wordPhonemes(trial.word);
+  const translation = L.hasTranslation ? (trial.word[trial.word.length - 1] || "") : "";
+  $("currentWord").innerHTML = `${word}${translation ? `<span class="kupu-translation">${translation}</span>` : ""}`;
   const c = $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value;
   const trainingTag = trainingActive() ? `🎓 ${state.training.name} — ` : "";
-  const noRecording = trainingActive() && !trial.trainingFile ? ` <b>(no training recording for this kupu)</b>` : "";
+  const noRecording = trainingActive() && !trial.trainingFile ? ` <b>(no training recording for this ${L.unit})</b>` : "";
   $("currentMeta").innerHTML = `${trainingTag}List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length} — <span class="condition-chip" title="Click to change condition">${conditionLabel(c)}</span>${noRecording}`;
   const conditionChip = $("currentMeta").querySelector(".condition-chip");
   if (conditionChip) conditionChip.onclick = openConditionDialog;
   if ($("phonemeHeading")) $("phonemeHeading").textContent = `Phoneme scoring - ${word}`;
   if ($("replayResponseBtn")) $("replayResponseBtn").hidden = !(trainingActive() && trial.trainingFile);
   updateLevelDisplay();
-  renderTargetPhonemes([c1,v1,c2,v2]);
-  renderAdvanced([c1,v1,c2,v2]);
+  renderTargetPhonemes(phonemes);
+  if (L.hasAdvanced) renderAdvanced(phonemes);
   renderSelectionColours();
   renderQueue();
   renderTrialNavigator();
@@ -1427,8 +1569,9 @@ function renderTrialNavigator() {
     const result = Number.isFinite(resultIdx) ? state.results[resultIdx] : null;
     const item = document.createElement("div");
     item.className = "trial-nav-item" + (idx === state.currentTrialIndex ? " current" : "") + (result ? " done" : "");
-    const scoreText = result ? `${result.score}/4` : idx === state.currentTrialIndex ? "now" : "—";
-    const scoreClass = result ? (result.score >= 3 ? "good" : "bad") : "";
+    const denom = result ? (result.phonemeCount || result.targetPhonemes?.length || 4) : phonemeCount();
+    const scoreText = result ? `${result.score}/${denom}` : idx === state.currentTrialIndex ? "now" : "—";
+    const scoreClass = result ? (result.score >= Math.ceil(denom * 0.75) ? "good" : "bad") : "";
     item.innerHTML = `<span>${idx + 1}</span><span>${trial.word[0]}</span><span class="trial-nav-score ${scoreClass}">${scoreText}</span>`;
     item.onclick = () => {
       if (idx === state.currentTrialIndex) {
@@ -1442,11 +1585,12 @@ function renderTrialNavigator() {
         const curTrial = currentTrial();
         const curQ = currentQueueItem();
         if (curTrial && curQ && state.scoringMode !== "none") {
-          const targets = curTrial.word.slice(1,5);
+          const targets = wordPhonemes(curTrial.word);
           const score = computeCurrentScore();
           const payload = {
             timestamp: new Date().toISOString(),
             client: state.client,
+            language: curQ.language || state.language,
             listNumber: curQ.listNumber,
             listLevelDbA: curQ.levelDbA,
             presentationCondition: $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value,
@@ -1457,11 +1601,12 @@ function renderTrialNavigator() {
             trialOrder: curTrial.order,
             presentedWord: curTrial.word[0],
             targetPhonemes: targets,
+            phonemeCount: targets.length,
             scoringMode: state.scoringMode,
-            responsePhonemes: state.scoringMode === "fast" ? [null,null,null,null] : [...state.responseSelections],
-            selectedTargetCorrectness: state.scoringMode === "fast" ? [false,false,false,false] : [...state.targetSelections],
+            responsePhonemes: state.scoringMode === "fast" ? blankResponses() : [...state.responseSelections],
+            selectedTargetCorrectness: state.scoringMode === "fast" ? blankSelections() : [...state.targetSelections],
             score,
-            percent: score * 25,
+            percent: Math.round((score / targets.length) * 100),
             maskerLevelReport: $("maskEar").value === "off" ? "none" : Number($("maskLevel").value),
             comment: $("trialComment").value.trim()
           };
@@ -1475,7 +1620,7 @@ function renderTrialNavigator() {
         }
         state.currentTrialIndex = idx;
         renderTrial();
-        drawPI();
+        refreshPI();
         updateRunningScore();
         saveSession();
       }
@@ -1639,7 +1784,7 @@ function computeCurrentScore() {
 
   const trial = currentTrial();
   if (!trial) return 0;
-  const targets = trial.word.slice(1,5);
+  const targets = wordPhonemes(trial.word);
   let score = 0;
   targets.forEach((target, idx) => {
     const advanced = state.responseSelections[idx];
@@ -1655,8 +1800,8 @@ function computeCurrentScore() {
 function renderSelectionColours() {
   const trial = currentTrial();
   if (!trial) return;
-  const targets = trial.word.slice(1,5);
-  const fastAllCorrect = state.scoringMode === "fast" && Number(state.trialScore) === 4;
+  const targets = wordPhonemes(trial.word);
+  const fastAllCorrect = state.scoringMode === "fast" && Number(state.trialScore) === phonemeCount();
 
   document.querySelectorAll(".phoneme-target").forEach((el, idx) => {
     const advanced = state.responseSelections[idx];
@@ -1710,8 +1855,8 @@ function markScoreButton() {
 function clearScoring() {
   state.trialScore = null;
   state.scoringMode = "none";
-  state.targetSelections = [false,false,false,false];
-  state.responseSelections = [null,null,null,null];
+  state.targetSelections = blankSelections();
+  state.responseSelections = blankResponses();
   $("trialComment").value = "";
   document.querySelectorAll(".phoneme-target,.phoneme-option").forEach(x => x.classList.remove("selected", "correct-selected", "incorrect-selected"));
   document.querySelectorAll(".diphthong-chip-area").forEach(a => a.innerHTML = "");
@@ -1731,11 +1876,17 @@ async function playCurrent(withCarrier) {
   const trial = currentTrial();
   const q = currentQueueItem();
   if (!trial || !q) return;
+  const L = lang();
   const word = trial.word[0];
+  // English resolves audio from sounds_cvc/ by its NNNN_Word file stem (col 4),
+  // trying .wav then .mp3; Māori resolves by the word from sounds/.
+  const stem = trial.word[4] || word;
+  const englishBases = [`${ENGLISH_SOUND_DIR}/${stem}.wav`, `${ENGLISH_SOUND_DIR}/${stem}.mp3`];
+  const stimBases = L.hasCarrier ? [word] : englishBases;
   const level = q.levelDbA;
   const ear = $("stimEar").value;
 
-  // In training mode, the client's recorded response follows the kupu.
+  // In training mode (Māori only), the client's recorded response follows the kupu.
   const chainResponse = (kupuNode) => {
     if (!trainingActive() || !trial.trainingFile) return;
     kupuNode.el.addEventListener("ended", () => {
@@ -1746,20 +1897,23 @@ async function playCurrent(withCarrier) {
   };
 
   try {
-    if (withCarrier) {
+    if (withCarrier && L.hasCarrier) {
+      // Māori: play the separate KōreroMai carrier, then the kupu.
       const carrier = await playFirstAvailable([pickKoreroMai()], ear, level, false);
       carrier.el.addEventListener("ended", async () => {
         try {
-          const kupu = await playFirstAvailable([word], ear, level, false);
+          const kupu = await playFirstAvailable(stimBases, ear, level, false);
           chainResponse(kupu);
         } catch {}
       }, { once: true });
     } else {
-      const kupu = await playFirstAvailable([word], ear, level, false);
+      // English: carrier is embedded in the file — just play the file.
+      const kupu = await playFirstAvailable(stimBases, ear, level, false);
       chainResponse(kupu);
     }
   } catch {
-    alert(`Could not play ${word}. Check the file exists in /sounds.`);
+    const where = L.hasCarrier ? "/sounds" : `/${ENGLISH_SOUND_DIR}`;
+    alert(`Could not play ${word}. Check the file exists in ${where}.`);
   }
 }
 
@@ -1865,10 +2019,11 @@ function nudgeLevel(delta) {
   const q = currentQueueItem();
   if (!q) return;
   const newLevel = q.levelDbA + delta;
+  const qLang = q.language || "maori";
 
-  // Check if results exist for the current list
+  // Check if results exist for the current list (this language, list & level)
   const listHasResults = state.results.some(r =>
-    r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA
+    r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA && (r.language || "maori") === qLang
   );
 
   if (listHasResults) {
@@ -1879,11 +2034,12 @@ function nudgeLevel(delta) {
     // Mark current list abandoned, remove its results, create new queue entry
     q.status = "abandoned";
     state.results = state.results.filter(r =>
-      !(r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA)
+      !(r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA && (r.language || "maori") === qLang)
     );
     const newEntry = {
       listNumber: q.listNumber,
       levelDbA: newLevel,
+      language: qLang,
       status: "in-progress",
       id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now())
     };
@@ -1898,7 +2054,7 @@ function nudgeLevel(delta) {
 
   updateLevelDisplay();
   renderTrial();
-  drawPI();
+  refreshPI();
   saveSession();
 }
 
@@ -1908,7 +2064,7 @@ function updateLevelDisplay() {
   const el = $("levelNudgeLabel");
   if (el) el.textContent = String(q.levelDbA);
   updateRunningScore();
-  drawPI();
+  refreshPI();
 }
 
 function updateRunningScore() {
@@ -1917,11 +2073,12 @@ function updateRunningScore() {
   const q = currentQueueItem();
   if (!q) { el.textContent = "—"; return; }
   const listResults = state.results.filter(r =>
-    r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA
+    r.listNumber === q.listNumber && r.listLevelDbA === q.levelDbA &&
+    (r.language || "maori") === (q.language || "maori")
   );
   if (!listResults.length) { el.textContent = "—"; return; }
   const correct = listResults.reduce((sum, r) => sum + Number(r.score || 0), 0);
-  const total = listResults.length * 4;
+  const total = listResults.reduce((sum, r) => sum + (r.phonemeCount || r.targetPhonemes?.length || 4), 0);
   const pct = Math.round((correct / total) * 100);
   el.textContent = `${correct}/${total} phonemes · ${pct}%`;
 }
@@ -1937,11 +2094,12 @@ function nextTrial() {
   const trial = currentTrial();
   const q = currentQueueItem();
   if (!trial || !q) return;
-  const targets = trial.word.slice(1,5);
+  const targets = wordPhonemes(trial.word);
   const score = computeCurrentScore();
   const resultPayload = {
     timestamp: new Date().toISOString(),
     client: state.client,
+    language: q.language || state.language,
     listNumber: q.listNumber,
     listLevelDbA: q.levelDbA,
     presentationCondition: $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value,
@@ -1952,11 +2110,12 @@ function nextTrial() {
     trialOrder: trial.order,
     presentedWord: trial.word[0],
     targetPhonemes: targets,
+    phonemeCount: targets.length,
     scoringMode: state.scoringMode,
-    responsePhonemes: state.scoringMode === "fast" ? [null,null,null,null] : [...state.responseSelections],
-    selectedTargetCorrectness: state.scoringMode === "fast" ? [false,false,false,false] : [...state.targetSelections],
+    responsePhonemes: state.scoringMode === "fast" ? blankResponses() : [...state.responseSelections],
+    selectedTargetCorrectness: state.scoringMode === "fast" ? blankSelections() : [...state.targetSelections],
     score,
-    percent: score * 25,
+    percent: Math.round((score / targets.length) * 100),
     maskerLevelReport: $("maskEar").value === "off" ? "none" : Number($("maskLevel").value),
     comment: $("trialComment").value.trim(),
     ...(trainingActive() ? {
@@ -1990,7 +2149,7 @@ function nextTrial() {
   else {
     renderTrial();
   }
-  drawPI();
+  refreshPI();
   updateRunningScore();
   updateSetupResultsSummary();
   saveSession();
@@ -2124,16 +2283,157 @@ function listSummaries() {
   for (const r of state.results) {
     const condition = r.presentationCondition || r.stimulusEar;
     const masked = r.maskerEar && r.maskerEar !== "off";
-    const key = `${r.listNumber}|${r.listLevelDbA}|${condition}|${masked}`;
-    if (!map.has(key)) map.set(key, { listNumber: r.listNumber, level: r.listLevelDbA, condition, ear: condition, masked, trials: 0, phonemes: 0 });
+    const language = r.language || "maori";
+    const key = `${language}|${r.listNumber}|${r.listLevelDbA}|${condition}|${masked}`;
+    if (!map.has(key)) map.set(key, { language, listNumber: r.listNumber, level: r.listLevelDbA, condition, ear: condition, masked, trials: 0, phonemes: 0, phonemeTotal: 0 });
     const s = map.get(key);
     s.trials++;
     s.phonemes += Number(r.score || 0);
+    s.phonemeTotal += (r.phonemeCount || r.targetPhonemes?.length || 4);
   }
-  return [...map.values()].map(s => ({ ...s, percent: s.trials ? Math.round((s.phonemes / (s.trials * 4)) * 100) : 0 }));
+  return [...map.values()].map(s => ({ ...s, percent: s.phonemeTotal ? Math.round((s.phonemes / s.phonemeTotal) * 100) : 0 }));
 }
 
-function drawPI() {
+// Which languages currently have any recorded results.
+function languagesWithResults() {
+  const set = new Set(state.results.map(r => r.language || "maori"));
+  return ["maori", "english"].filter(k => set.has(k));
+}
+
+// ── Language switching ────────────────────────────────────────────
+function repopulateListSelects() {
+  const listNums = Object.keys(currentWordLists()).map(Number).sort((a,b)=>a-b);
+  [["listChoice"], ["queueListNumber"]].forEach(([id]) => {
+    const sel = $(id);
+    if (!sel) return;
+    const prev = sel.value;
+    sel.innerHTML = "";
+    listNums.forEach(i => {
+      const opt = document.createElement("option");
+      opt.value = String(i);
+      opt.textContent = `List ${i}`;
+      sel.appendChild(opt);
+    });
+    if (listNums.includes(Number(prev))) sel.value = prev;
+  });
+}
+
+// Reflect the active language across the UI: toggle buttons, terminology,
+// available list numbers, and the visibility of Māori-only controls.
+function applyLanguageToUI() {
+  const L = lang();
+  document.querySelectorAll(".language-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.lang === state.language));
+
+  // Stimulus play-button label + terminology
+  if ($("playWordBtn")) {
+    $("playWordBtn").textContent = L.hasCarrier ? 'Play "Kōrero mai..." + kupu' : "Play word";
+  }
+  if ($("repeatWordBtn")) {
+    $("repeatWordBtn").textContent = L.hasCarrier ? "Replay kupu only" : "Replay word";
+    // English has no separate word-only stimulus — replay plays the same file.
+    $("repeatWordBtn").title = L.hasCarrier ? "" : "Replays the full recording (carrier is part of the file)";
+  }
+  if ($("phonemeHeading")) $("phonemeHeading").textContent = "Phoneme scoring";
+
+  // Advanced phoneme selection — Māori only.
+  const advancedDetails = document.getElementById("advancedDetails");
+  if (advancedDetails) advancedDetails.style.display = L.hasAdvanced ? "" : "none";
+
+  // Training controls — Māori only.
+  const trainingControls = document.querySelector(".training-controls");
+  if (trainingControls) trainingControls.style.display = L.hasTraining ? "" : "none";
+
+  repopulateListSelects();
+  setupFastScoreButtons();
+}
+
+function setLanguage(langKey, opts = {}) {
+  if (!LANGUAGES[langKey] || langKey === state.language) {
+    applyLanguageToUI();
+    return;
+  }
+  // If switching away from a language that has training active, exit training.
+  if (langKey !== "maori" && trainingActive()) exitTraining();
+  state.language = langKey;
+  applyLanguageToUI();
+  renderQueue();
+  if (!opts.silent) saveSession();
+}
+
+// Tabs above the PI canvas — shown only when both languages have data.
+function renderPiTabs() {
+  const box = $("piTabs");
+  if (!box) return;
+  const withData = languagesWithResults();
+  if (withData.length < 2) {
+    box.hidden = true;
+    box.innerHTML = "";
+    // Keep the displayed tab consistent with what's actually plotted.
+    state._piTab = withData[0] || null;
+    return;
+  }
+  box.hidden = false;
+  const active = activePiLanguage();
+  box.innerHTML = "";
+  withData.forEach(k => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pi-tab" + (k === active ? " active" : "");
+    btn.textContent = LANGUAGES[k].label;
+    btn.onclick = () => {
+      state._piTab = k;
+      renderPiTabs();
+      drawPI(k);
+    };
+    box.appendChild(btn);
+  });
+}
+
+// Always refresh tabs alongside the plot.
+function refreshPI() {
+  renderPiTabs();
+  drawPI();
+}
+
+// Which language the PI canvas is currently showing. Defaults to the
+// active test language, falling back to whatever has data.
+function activePiLanguage() {
+  const withData = languagesWithResults();
+  if (state._piTab && withData.includes(state._piTab)) return state._piTab;
+  if (withData.includes(state.language)) return state.language;
+  return withData[0] || state.language;
+}
+
+// Glyph for one plotted point. condition + masking decide the mark.
+function drawPiGlyph(ctx, px, py, condition, masked) {
+  ctx.save();
+  ctx.font = "bold 22px system-ui";
+  if (condition === "left") {
+    ctx.fillStyle = "#135bd8";
+    if (masked) {
+      // Masked left: two ×'s overlapping horizontally (a "double-x").
+      ctx.fillText("×", px - 11, py + 7);
+      ctx.fillText("×", px - 3, py + 7);
+    } else {
+      ctx.fillText("×", px - 7, py + 7);
+    }
+  } else if (condition === "right") {
+    ctx.strokeStyle = "#c52222";
+    ctx.fillStyle = "#c52222";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(px, py, 8, 0, Math.PI * 2);
+    if (masked) ctx.fill();   // masked right: filled circle
+    else ctx.stroke();        // unmasked right: open circle
+  } else {
+    ctx.fillStyle = "#111";
+    ctx.fillText(conditionSymbol(condition), px - 7, py + 7);
+  }
+  ctx.restore();
+}
+
+function drawPI(forLanguage) {
   const canvas = $("piCanvas");
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
@@ -2142,6 +2442,8 @@ function drawPI() {
   ctx.fillStyle = "#fff"; ctx.fillRect(0,0,w,h);
   ctx.strokeStyle = "#777"; ctx.lineWidth = 1;
   const left = 50, right = w - 20, top = 20, bottom = h - 45;
+  const xOf = lvl => left + (Math.max(0, Math.min(100, lvl)) / 100) * (right - left);
+  const yOf = pct => bottom - (Math.max(0, Math.min(100, pct)) / 100) * (bottom - top);
 
   ctx.beginPath();
   ctx.moveTo(left, top); ctx.lineTo(left, bottom); ctx.lineTo(right, bottom); ctx.stroke();
@@ -2149,67 +2451,95 @@ function drawPI() {
   ctx.font = "13px system-ui";
   ctx.fillStyle = "#111";
   for (let y = 0; y <= 100; y += 20) {
-    const py = bottom - (y / 100) * (bottom - top);
+    const py = yOf(y);
     ctx.strokeStyle = "#ddd"; ctx.beginPath(); ctx.moveTo(left, py); ctx.lineTo(right, py); ctx.stroke();
-    ctx.fillText(String(y), 18, py + 4);
+    ctx.fillStyle = "#111"; ctx.fillText(String(y), 18, py + 4);
   }
   for (let x = 0; x <= 100; x += 20) {
-    const px = left + (x / 100) * (right - left);
+    const px = xOf(x);
     ctx.strokeStyle = "#ddd"; ctx.beginPath(); ctx.moveTo(px, top); ctx.lineTo(px, bottom); ctx.stroke();
     ctx.fillStyle = "#111"; ctx.fillText(String(x), px - 8, bottom + 20);
   }
   ctx.fillText("dB(A)", (left+right)/2 - 18, h - 8);
   ctx.save(); ctx.translate(12, (top+bottom)/2 + 35); ctx.rotate(-Math.PI/2); ctx.fillText("% correct", 0, 0); ctx.restore();
 
-  for (const s of listSummaries()) {
-    const px = left + (Math.max(0, Math.min(100, s.level)) / 100) * (right - left);
-    const py = bottom - (s.percent / 100) * (bottom - top);
-    const condition = s.condition || s.ear;
-    const sym = conditionSymbol(condition);
-    ctx.font = "bold 22px system-ui";
+  const plotLang = forLanguage || activePiLanguage();
+  const summaries = listSummaries().filter(s => (s.language || "maori") === plotLang);
 
-    if (condition === "left") {
-      ctx.fillStyle = "#135bd8";
-      ctx.fillText("×", px - 7, py + 7);
-      if (s.masked) ctx.fillText("×", px - 2, py + 7);
-    } else if (condition === "right") {
-      ctx.strokeStyle = "#c52222";
-      ctx.fillStyle = "#c52222";
+  // ── Connecting lines ─────────────────────────────────────────────
+  // One line per condition (ear), threaded across levels. Where two
+  // points share the same level, the masked one wins the line; if the
+  // masking state also matches, the most recent wins. Every point is
+  // still drawn as its own glyph below — nothing is dropped.
+  const byCondition = {};
+  for (const s of summaries) {
+    const cond = s.condition || s.ear;
+    (byCondition[cond] = byCondition[cond] || []).push(s);
+  }
+
+  for (const [cond, pts] of Object.entries(byCondition)) {
+    // Pick the line-bearing point at each level.
+    const bestByLevel = new Map();
+    for (const p of pts) {
+      const existing = bestByLevel.get(p.level);
+      if (!existing) { bestByLevel.set(p.level, p); continue; }
+      // masked wins; otherwise keep the one already chosen (latest insertion)
+      if (p.masked && !existing.masked) bestByLevel.set(p.level, p);
+    }
+    const linePts = [...bestByLevel.values()].sort((a, b) => a.level - b.level);
+    if (linePts.length >= 2) {
+      ctx.save();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = cond === "left" ? "#135bd8" : cond === "right" ? "#c52222" : "#444";
+      // Left = dashed, right & others = solid.
+      ctx.setLineDash(cond === "left" ? [6, 4] : []);
       ctx.beginPath();
-      ctx.arc(px, py, 8, 0, Math.PI*2);
-      if (s.masked) ctx.fill();
-      else ctx.stroke();
-    } else {
-      ctx.fillStyle = "#111";
-      ctx.fillText(sym, px - 7, py + 7);
+      linePts.forEach((p, i) => {
+        const px = xOf(p.level), py = yOf(p.percent);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      });
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
-  // Crosshair: current stimulus level & % correct at that level
+  // ── Glyphs (all points, always) ──────────────────────────────────
+  for (const s of summaries) {
+    drawPiGlyph(ctx, xOf(s.level), yOf(s.percent), s.condition || s.ear, s.masked);
+  }
+
+  // ── Crosshair: only on the tab matching the active test language ──
   const q = currentQueueItem();
-  if (q && $("screen-test").classList.contains("active")) {
+  const showCrosshair = q && $("screen-test").classList.contains("active") &&
+    plotLang === (q.language || state.language);
+  if (showCrosshair) {
     const clevel = q.levelDbA;
     const listResults = state.results.filter(r =>
-      r.listNumber === q.listNumber && r.listLevelDbA === clevel
+      r.listNumber === q.listNumber && r.listLevelDbA === clevel &&
+      (r.language || "maori") === (q.language || "maori")
     );
-    const cpct = listResults.length
-      ? Math.round((listResults.reduce((s,r) => s + Number(r.score||0), 0) / (listResults.length * 4)) * 100)
-      : 0;
-    const cx = left + (Math.max(0, Math.min(100, clevel)) / 100) * (right - left);
-    const cy = bottom - (cpct / 100) * (bottom - top);
+    const correct = listResults.reduce((s,r) => s + Number(r.score||0), 0);
+    const total = listResults.reduce((s,r) => s + (r.phonemeCount || r.targetPhonemes?.length || 4), 0);
+    const cpct = total ? Math.round((correct / total) * 100) : 0;
+    const cx = xOf(clevel);
+    const cy = yOf(cpct);
 
     ctx.save();
     ctx.strokeStyle = "#b31b1b";
     ctx.lineWidth = 1.5;
     ctx.setLineDash([4, 3]);
-    // Vertical line
     ctx.beginPath(); ctx.moveTo(cx, top); ctx.lineTo(cx, bottom); ctx.stroke();
-    // Horizontal line
     ctx.beginPath(); ctx.moveTo(left, cy); ctx.lineTo(right, cy); ctx.stroke();
-    // Centre dot
     ctx.setLineDash([]);
     ctx.fillStyle = "#b31b1b";
     ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2); ctx.fill();
+
+    // Tiny red % label by the Y-axis, baseline resting on the horizontal line.
+    // Clamp near the top so it tucks under the line instead of clipping.
+    ctx.font = "bold 11px system-ui";
+    ctx.textAlign = "left";
+    const labelBaseline = (cy - 3 < top + 10) ? cy + 12 : cy - 3;
+    ctx.fillText(`${cpct}%`, left + 3, labelBaseline);
     ctx.restore();
   }
 }
@@ -2232,7 +2562,9 @@ function autoSaveJson() {
   readClientForm();
   const payload = {
     exportedAt: new Date().toISOString(),
-    app: "UC Te reo Māori CVCV Speech Audiometry",
+    app: "UC Speech Audiometry (Te reo Māori / NZ English)",
+    activeLanguage: state.language,
+    languagesPresent: languagesWithResults(),
     client: state.client,
     setup: {
       presentationCondition: $("presentationCondition") ? $("presentationCondition").value : "",
@@ -2248,7 +2580,7 @@ function autoSaveJson() {
     summaries: listSummaries()
   };
   const date = (state.client.date || new Date().toISOString().slice(0,10)).replace(/-/g,"");
-  download(`${safeName()}_${date}_te_reo_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
+  download(`${safeName()}_${date}_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
 }
 
 function downloadJson() {
@@ -2272,11 +2604,18 @@ function buildTsv() {
     []
   ];
 
-  const cols = ["timestamp","clientName","clientId","clientDob","listNumber","listLevelDbA","presentationCondition","stimulusEar","transducer","maskerEar","maskerLevelDbA","trialOrder","presentedWord","targetPhonemes","scoringMode","responsePhonemes","score","percent","comment"];
-  const rows = state.results.map(r => [
-    r.timestamp, state.client.name, state.client.id, state.client.dob, r.listNumber, r.listLevelDbA, r.presentationCondition, r.stimulusEar, r.transducer, r.maskerEar, r.maskerLevelReport ?? r.maskerLevelDbA ?? "none", r.trialOrder, r.presentedWord,
-    r.targetPhonemes.join(" "), r.scoringMode || "", r.scoringMode === "fast" ? (Number(r.score) === 4 ? r.targetPhonemes.join(" ") : "not recorded") : r.responsePhonemes.join(" "), r.score, r.percent, r.comment
-  ]);
+  const cols = ["timestamp","language","clientName","clientId","clientDob","listNumber","listLevelDbA","presentationCondition","stimulusEar","transducer","maskerEar","maskerLevelDbA","trialOrder","presentedWord","targetPhonemes","scoringMode","responsePhonemes","score","scoreOutOf","percent","comment"];
+  const rows = state.results.map(r => {
+    const denom = r.phonemeCount || r.targetPhonemes?.length || 4;
+    const langLabel = (LANGUAGES[r.language || "maori"] || LANGUAGES.maori).label;
+    const responseStr = r.scoringMode === "fast"
+      ? (Number(r.score) === denom ? r.targetPhonemes.join(" ") : "not recorded")
+      : (r.responsePhonemes || []).join(" ");
+    return [
+      r.timestamp, langLabel, state.client.name, state.client.id, state.client.dob, r.listNumber, r.listLevelDbA, r.presentationCondition, r.stimulusEar, r.transducer, r.maskerEar, r.maskerLevelReport ?? r.maskerLevelDbA ?? "none", r.trialOrder, r.presentedWord,
+      r.targetPhonemes.join(" "), r.scoringMode || "", responseStr, r.score, denom, r.percent, r.comment
+    ];
+  });
 
   return [...headerRows, cols, ...rows]
     .map(row => row.map(x => String(x ?? "").replace(/\t/g," ").replace(/\n/g," ")).join("\t"))
@@ -2284,7 +2623,7 @@ function buildTsv() {
 }
 
 function downloadTsv() {
-  download(`${safeName()}_te_reo_speech_audiometry.tsv`, "text/tab-separated-values", buildTsv());
+  download(`${safeName()}_speech_audiometry.tsv`, "text/tab-separated-values", buildTsv());
 }
 
 async function copyTsv() {
@@ -2310,41 +2649,73 @@ function showReport() {
     return;
   }
   state._reportCalledFrom = document.querySelector(".screen.active")?.id || "screen-setup";
-  const summaries = listSummaries();
-  const rows = state.results.map(r => {
-    let combinedResponse;
-    if (r.scoringMode === "fast") {
-      combinedResponse = Number(r.score) === 4 ? r.targetPhonemes.join(" ") : "not recorded";
-    } else {
-      combinedResponse = r.targetPhonemes.map((target, idx) => {
-        const advanced = r.responsePhonemes?.[idx];
-        const selectedCorrect = r.selectedTargetCorrectness?.[idx];
-        if (advanced !== null && advanced !== undefined && advanced !== "") return advanced;
-        if (selectedCorrect) return target;
-        return "–";
-      }).join(" ");
-    }
-    return `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${conditionLabel(r.presentationCondition || r.stimulusEar)}</td><td>${r.transducer || ""}</td><td>${r.maskerLevelReport ?? r.maskerLevelDbA ?? "none"}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${combinedResponse}</td><td>${r.score}/4</td><td>${r.comment || ""}</td></tr>`;
-  }).join("");
-  const summaryRows = summaries.map(s =>
-    `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${conditionLabel(s.condition || s.ear)}</td><td>${s.masked ? "Yes" : "No"}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`
-  ).join("");
 
-  // Draw PI on the hidden canvas then capture it
-  drawPI();
-  const piDataUrl = $("piCanvas") ? $("piCanvas").toDataURL("image/png") : "";
+  const langs = languagesWithResults();
+  const allSummaries = listSummaries();
+
+  const denomOf = r => r.phonemeCount || r.targetPhonemes?.length || 4;
+  const responseText = (r) => {
+    const denom = denomOf(r);
+    if (r.scoringMode === "fast") {
+      return Number(r.score) === denom ? r.targetPhonemes.join(" ") : "not recorded";
+    }
+    return r.targetPhonemes.map((target, idx) => {
+      const advanced = r.responsePhonemes?.[idx];
+      const selectedCorrect = r.selectedTargetCorrectness?.[idx];
+      if (advanced !== null && advanced !== undefined && advanced !== "") return advanced;
+      if (selectedCorrect) return target;
+      return "–";
+    }).join(" ");
+  };
+
+  // Capture one PI image per language by drawing each into the canvas.
+  const piImages = {};
+  for (const lk of langs) {
+    drawPI(lk);
+    piImages[lk] = $("piCanvas") ? $("piCanvas").toDataURL("image/png") : "";
+  }
+  // Restore the live canvas to the active tab.
+  refreshPI();
+
+  // Per-language report sections (plot + summary + trial table).
+  const langSection = (lk) => {
+    const L = LANGUAGES[lk] || LANGUAGES.maori;
+    const summaries = allSummaries.filter(s => (s.language || "maori") === lk);
+    const results = state.results.filter(r => (r.language || "maori") === lk);
+    const summaryRows = summaries.map(s =>
+      `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${conditionLabel(s.condition || s.ear)}</td><td>${s.masked ? "Yes" : "No"}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`
+    ).join("");
+    const trialRows = results.map(r =>
+      `<tr><td>${r.listNumber}</td><td>${r.listLevelDbA}</td><td>${conditionLabel(r.presentationCondition || r.stimulusEar)}</td><td>${r.transducer || ""}</td><td>${r.maskerLevelReport ?? r.maskerLevelDbA ?? "none"}</td><td>${r.presentedWord}</td><td>${r.targetPhonemes.join(" ")}</td><td>${responseText(r)}</td><td>${r.score}/${denomOf(r)}</td><td>${r.comment || ""}</td></tr>`
+    ).join("");
+    const wordHeader = L.unitTitle;
+    return `
+      <section class="report-lang-section">
+        <h2>${L.label} — performance intensity function</h2>
+        ${piImages[lk] ? `<img class="report-pi" src="${piImages[lk]}" alt="${L.label} performance intensity plot">` : ""}
+        <p class="report-pi-legend">× Left (dashed) &nbsp; ×× Masked left &nbsp; ○ Right (solid) &nbsp; ● Masked right &nbsp; B Binaural &nbsp; S/A/U Sound field / Aided / Unaided</p>
+        <h3>${L.label} — summary</h3>
+        <table class="report-table"><thead><tr><th>List</th><th>Level dB(A)</th><th>Condition</th><th>Masked</th><th>Trials</th><th>% correct</th></tr></thead><tbody>${summaryRows}</tbody></table>
+        <h3>${L.label} — trial data</h3>
+        <table class="report-table"><thead><tr><th>List</th><th>dB(A)</th><th>Condition</th><th>Transducer</th><th>Masker dB(A)</th><th>${wordHeader}</th><th>Target</th><th>Response</th><th>Score</th><th>Comment</th></tr></thead><tbody>${trialRows}</tbody></table>
+      </section>`;
+  };
+
+  const sectionsHtml = langs.map(langSection).join("");
 
   const logoHtml = state.clinicLogo
     ? `<img src="${state.clinicLogo}" alt="Clinic logo" style="max-height:60px;max-width:200px;object-fit:contain">`
     : "";
   const clinicNameVal = ($("clinicName") ? $("clinicName").value.trim() : "") || "University of Canterbury Hearing Clinic";
+  const titleLangs = langs.map(lk => (LANGUAGES[lk] || LANGUAGES.maori).label).join(" / ");
 
   $("reportContent").innerHTML = `
     <div class="report-header-row">
       <div>${logoHtml}</div>
       <div style="text-align:right;color:#555;font-size:.9rem">${clinicNameVal}</div>
     </div>
-    <h1>Te reo Māori CVCV Speech Audiometry Report</h1>
+    <h1>Speech Audiometry Report</h1>
+    <p class="report-pi-legend">Languages assessed: ${titleLangs}</p>
     <div class="report-grid">
       <div>
         <p><b>Client:</b> ${state.client.name || ""}</p>
@@ -2359,13 +2730,7 @@ function showReport() {
         <p><b>Notes:</b> ${state.client.notes || ""}</p>
       </div>
     </div>
-    <h2>Performance intensity function</h2>
-    ${piDataUrl ? `<img class="report-pi" src="${piDataUrl}" alt="Performance intensity plot">` : ""}
-    <p class="report-pi-legend">× Left &nbsp; ○ Right &nbsp; B Binaural &nbsp; S/A/U Sound field / Aided / Unaided</p>
-    <h2>Summary</h2>
-    <table class="report-table"><thead><tr><th>List</th><th>Level dB(A)</th><th>Condition</th><th>Masked</th><th>Trials</th><th>% correct</th></tr></thead><tbody>${summaryRows}</tbody></table>
-    <h2>Trial data</h2>
-    <table class="report-table"><thead><tr><th>List</th><th>dB(A)</th><th>Condition</th><th>Transducer</th><th>Masker dB(A)</th><th>Kupu</th><th>Target</th><th>Response</th><th>Score</th><th>Comment</th></tr></thead><tbody>${rows}</tbody></table>
+    ${sectionsHtml}
   `;
   show("screen-report");
 }
