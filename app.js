@@ -1632,6 +1632,8 @@ function renderTrialNavigator() {
 function renderTargetPhonemes(phonemes) {
   const row = $("targetPhonemes");
   row.innerHTML = "";
+  // Match the column count to the phoneme count so 3 English tiles fill the row.
+  row.style.gridTemplateColumns = `repeat(${phonemes.length}, 1fr)`;
   phonemes.forEach((p, idx) => {
     const div = document.createElement("div");
     div.className = "phoneme-target";
@@ -1651,6 +1653,7 @@ function renderTargetPhonemes(phonemes) {
 function renderAdvanced(targets) {
   const box = $("advancedColumns");
   box.innerHTML = "";
+  box.style.gridTemplateColumns = `repeat(${targets.length}, 1fr)`;
   targets.forEach((target, idx) => {
     const type = idx % 2 === 0 ? "C" : "V";
     const col = document.createElement("div");
