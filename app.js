@@ -212,6 +212,7 @@ const state = {
   // Per-language word-order override; null = use the language's default.
   randomiseOverride: { maori: null, english: null },
   clinicLogo: null,
+  dialectSubstitutions: {},
   training: null,
   _trainingBypass: false,
   audio: {
@@ -257,6 +258,7 @@ function init() {
   renderQueue();
   updateSetupResultsSummary();
   updateTrainingBadge();
+  updateClearClientBtn();
 }
 
 // ── Clinic settings (device-persistent, separate from session) ──
@@ -319,6 +321,7 @@ function saveSession() {
     currentTrialIndex: state.currentTrialIndex,
     currentTrials: state.currentTrials,
     results: state.results,
+    dialectSubstitutions: state.dialectSubstitutions,
     training: state.training
   };
   localStorage.setItem(key, JSON.stringify(payload));
@@ -350,6 +353,7 @@ function openSavedJson(e) {
       if (data.calibration) state.calibration = data.calibration;
       if (data.queue)       state.queue = data.queue;
       if (data.results)     state.results = data.results;
+      state.dialectSubstitutions = data.dialectSubstitutions || {};
       if (data.language && LANGUAGES[data.language]) { state.language = data.language; applyLanguageToUI(); }
       // Repopulate client fields
       $("clientName").value = state.client?.name || "";
@@ -480,6 +484,8 @@ function restoreSession() {
     renderRecentSessions();
     updateSetupResultsSummary();
     updateTrainingBadge();
+    if (!state.dialectSubstitutions) state.dialectSubstitutions = {};
+    updateClearClientBtn();
   } catch { alert("Could not restore session — data may be corrupt."); }
 }
 
@@ -591,7 +597,7 @@ async function openTrainingPicker() {
   btn.textContent = "Loading clients…";
   const profiles = await loadTrainingClients();
   btn.disabled = false;
-  btn.textContent = "🎓 Training mode…";
+  btn.textContent = "🎓 Train scoring";
   if (!profiles.length) {
     alert(`No training clients found.\nAdd ClientXX.json profiles and response mp3s to the /${TRAINING_DIR} folder.`);
     return;
@@ -646,6 +652,7 @@ function activateTrainingClient(profile) {
     (dialectNotes ? ` ${dialectNotes}` : "");
 
   updateTrainingBadge();
+  updateClearClientBtn();
   saveSession();
 }
 
@@ -658,6 +665,7 @@ function exitTraining() {
   $("trainingClientSelect").value = "";
   $("trainingBtn").hidden = false;
   updateTrainingBadge();
+  updateClearClientBtn();
   saveSession();
 }
 
@@ -680,15 +688,147 @@ function updateTrainingBadge() {
   }
 }
 
-// Dialect-aware equivalence: a substitution listed in the client's
-// dialect profile is correct wherever it occurs.
+/* ── Mita / dialect substitutions ───────────────────────────────
+   Session-level client substitutions keyed by target phoneme, e.g.
+   { "ŋ": ["k"], "f": ["w","h"] }. Selected substitutes score as correct
+   wherever the target occurs (see substitutesForTarget / equivalentForScoring).
+   When a training client is loaded the dialog is read-only and reflects the
+   loaded profile instead. */
+
+const MITA_NOTE_PREFIX = "Mita/dialect:";
+
+// Flatten a substitution map ({ target: [subs] } or legacy
+// { target: {substitute} }) into an array of {target, sub} pairs.
+function mitaPairsFromMap(map) {
+  const pairs = [];
+  for (const [target, val] of Object.entries(map || {})) {
+    if (Array.isArray(val)) val.forEach(sub => pairs.push({ target, sub }));
+    else if (val && val.substitute) pairs.push({ target, sub: val.substitute });
+  }
+  return pairs;
+}
+
+function mitaActiveMap() {
+  // Source of truth for the dialog: training profile (read-only) or session.
+  if (trainingActive()) return state.training.dialectSubstitutions || {};
+  return state.dialectSubstitutions || {};
+}
+
+function openMitaDialog() {
+  const dlg = $("mitaDialog");
+  if (!dlg) return;
+  const readOnly = trainingActive();
+  const card = dlg.querySelector(".dialog-card");
+  if (card) card.classList.toggle("readonly", readOnly);
+
+  const activePairs = mitaPairsFromMap(mitaActiveMap());
+  const isActive = (t, s) => activePairs.some(p => p.target === t && p.sub === s);
+
+  dlg.querySelectorAll(".mita-toggle").forEach(btn => {
+    const t = btn.dataset.target, s = btn.dataset.sub;
+    btn.classList.toggle("active", isActive(t, s));
+    btn.onclick = readOnly ? null : () => btn.classList.toggle("active");
+  });
+
+  $("mitaTitle").textContent = readOnly
+    ? `Mita / dialect — ${state.training.name}`
+    : "Mita / dialect substitutions";
+  $("mitaIntro").textContent = readOnly
+    ? "From this training client's case history. Shown for reference; these score as correct wherever the target phoneme occurs."
+    : "Select the realisations this client uses. Selected substitutions score as correct wherever the target phoneme occurs.";
+  $("mitaSaveBtn").style.display = readOnly ? "none" : "";
+  $("mitaCancelBtn").textContent = readOnly ? "Close" : "Cancel";
+
+  dlg.showModal();
+}
+
+function saveMitaDialog() {
+  if (trainingActive()) { $("mitaDialog").close(); return; }
+  const map = {};
+  $("mitaDialog").querySelectorAll(".mita-toggle.active").forEach(btn => {
+    const t = btn.dataset.target, s = btn.dataset.sub;
+    (map[t] = map[t] || []).push(s);
+  });
+  state.dialectSubstitutions = map;
+  applyMitaToNotes();
+  saveSession();
+  $("mitaDialog").close();
+}
+
+// Compose a human-readable substitution line, e.g.
+// "Mita/dialect: /ŋ/→/k/, /f/→/w/".
+function mitaNoteLine() {
+  const pairs = mitaPairsFromMap(state.dialectSubstitutions);
+  if (!pairs.length) return "";
+  const bits = pairs.map(p => `/${p.target}/→/${p.sub}/`);
+  return `${MITA_NOTE_PREFIX} ${bits.join(", ")}`;
+}
+
+// Prepend (idempotently) the substitution line to the notes field. Any
+// existing Mita/dialect line is stripped first so re-saving updates cleanly.
+function applyMitaToNotes() {
+  const ta = $("sessionNotes");
+  if (!ta) return;
+  const existing = ta.value
+    .split("\n")
+    .filter(l => !l.trim().startsWith(MITA_NOTE_PREFIX))
+    .join("\n")
+    .replace(/^\n+/, "");
+  const line = mitaNoteLine();
+  ta.value = line ? (existing ? `${line}\n${existing}` : line) : existing;
+}
+
+function clearClient() {
+  const hasAny =
+    ($("clientName") && $("clientName").value.trim()) ||
+    ($("clientId") && $("clientId").value.trim()) ||
+    ($("clientDob") && $("clientDob").value);
+  if (!hasAny) return;
+  if (!confirm("Clear the client name, NHI/ID and date of birth? This can't be undone.")) return;
+  if ($("clientName")) $("clientName").value = "";
+  if ($("clientId")) $("clientId").value = "";
+  if ($("clientDob")) $("clientDob").value = "";
+  state.client = { ...state.client, name: "", id: "", dob: "" };
+  saveSession();
+  renderRecentSessions();
+  updateClearClientBtn();
+}
+
+function updateClearClientBtn() {
+  const btn = $("clearClientBtn");
+  if (!btn) return;
+  const hasAny =
+    ($("clientName") && $("clientName").value.trim()) ||
+    ($("clientId") && $("clientId").value.trim()) ||
+    ($("clientDob") && $("clientDob").value);
+  btn.disabled = !hasAny;
+}
+
+// Return the list of accepted substitute phonemes for a target, drawn from
+// (a) the session-level client substitutions and (b) a loaded training
+// profile. Handles both data shapes: session uses { target: [subs...] };
+// legacy training profiles use { target: { substitute, message } }.
+function substitutesForTarget(target) {
+  const out = new Set();
+
+  const session = state.dialectSubstitutions?.[target];
+  if (Array.isArray(session)) session.forEach(s => out.add(s));
+
+  if (trainingActive()) {
+    const prof = state.training.dialectSubstitutions?.[target];
+    if (Array.isArray(prof)) prof.forEach(s => out.add(s));
+    else if (prof && prof.substitute) out.add(prof.substitute);
+  }
+  return [...out];
+}
+
+// Dialect-aware equivalence: a substitution listed for the client (either
+// entered manually via the Mita dialog or carried by a training profile)
+// is correct wherever it occurs.
 function equivalentForScoring(target, response) {
   if (equivalent(target, response)) return true;
-  if (trainingActive()) {
-    const sub = state.training.dialectSubstitutions?.[target];
-    if (sub && sub.substitute === response) return true;
-  }
-  return false;
+  if (!response || response === "–") return false;
+  return substitutesForTarget(target).includes(response);
 }
 
 function ensureTrialTrainingVariant(trial) {
@@ -747,8 +887,13 @@ function evaluateTrainingPositions(targets, response) {
     if (!r || r === "–") return { target: t, response: r || "–", correct: false, type: "omission" };
     if (t === r) return { target: t, response: r, correct: true, type: "exact" };
     if (equivalent(t, r)) return { target: t, response: r, correct: true, type: "length" };
-    const sub = state.training?.dialectSubstitutions?.[t];
-    if (sub && sub.substitute === r) return { target: t, response: r, correct: true, type: "dialect", message: sub.message };
+    if (substitutesForTarget(t).includes(r)) {
+      const prof = state.training?.dialectSubstitutions?.[t];
+      const message = (prof && !Array.isArray(prof) && prof.message)
+        ? prof.message
+        : `/${r}/ for /${t}/ is a listed dialect variant for this client.`;
+      return { target: t, response: r, correct: true, type: "dialect", message };
+    }
     return { target: t, response: r, correct: false, type: "substitution" };
   });
 }
@@ -781,7 +926,8 @@ function handleTrainingNext() {
     return;
   }
 
-  const targets = trial.word.slice(1, 5);
+  const targets = wordPhonemes(trial.word);
+  const total = phonemeCount();
   const positions = evaluateTrainingPositions(targets, trial.trainingResponse);
   const trueScore = positions.filter(p => p.correct).length;
   trial.trainingTrueScore = trueScore;
@@ -802,33 +948,77 @@ function handleTrainingNext() {
 
   if (match) {
     trial.trainingMatched = true;
-    if (trueScore === 4) {
-      showTrainingFeedback("✓ Correct", `<p class="tf-summary">All four phonemes correct — 4/4.</p>`, { continue: true });
+    if (trueScore === total) {
+      showTrainingFeedback("✓ Correct", `<p class="tf-summary">All ${total} phonemes correct — ${trueScore}/${total}.</p>`, { continue: true });
     } else {
       const detail = positions.map(describePosition).join("");
-      showTrainingFeedback(`✓ Correct — ${trueScore}/4`,
+      showTrainingFeedback(`✓ Correct — ${trueScore}/${total}`,
         `<p class="tf-summary">You scored this correctly.</p>${detail}`, { continue: true });
     }
   } else {
     trial.trainingAttempts = (trial.trainingAttempts || 0) + 1;
+
+    // Per-position: where did the TRAINEE disagree with the truth?
+    const traineeMismatches = [];
+    positions.forEach((pos, i) => {
+      const transcribed = state.responseSelections[i];
+      const judgedCorrect =
+        (transcribed !== null && transcribed !== undefined && transcribed !== "")
+          ? equivalentForScoring(targets[i], transcribed)
+          : !!state.targetSelections[i];
+      if (judgedCorrect !== pos.correct) {
+        traineeMismatches.push({ pos, i, transcribed, judgedCorrect });
+      }
+    });
+
     let body;
     if (traineeScore === trueScore) {
       // Total is right but the wrong positions are marked correct/incorrect
-      body = `<p class="tf-summary">Your total of ${trueScore}/4 is right, but you've marked the wrong phonemes as correct.</p>` +
+      body = `<p class="tf-summary">Your total of ${trueScore}/${total} is right, but you've marked the wrong phonemes as correct.</p>` +
              `<p>Listen again — which sounds did the client actually get right?</p>`;
     } else {
-      body = `<p class="tf-summary">Not quite — you scored ${traineeScore}/4, the correct score is ${trueScore}/4.</p>`;
+      body = `<p class="tf-summary">Not quite — you scored ${traineeScore}/${total}, the correct score is ${trueScore}/${total}.</p>`;
     }
+
     if (trial.trainingAttempts >= 2) {
+      // Full reveal: show every position
       body += positions.map(describePosition).join("");
     } else {
-      if (traineeScore !== trueScore) body += `<p>Have another listen to the client's response and re-score before pressing Next.</p>`;
-      // Even on first miss, surface any teaching-moment positions
-      const teach = positions.filter(p => p.type === "dialect" || p.type === "length");
-      if (teach.length) body += teach.map(p => describePosition(p, positions.indexOf(p))).join("");
+      // First miss: point at the positions the trainee actually got wrong…
+      traineeMismatches.forEach(({ pos, i, transcribed, judgedCorrect }) => {
+        body += describeTraineeMismatch(pos, i, transcribed, judgedCorrect);
+      });
+      // …plus any teaching-moment positions the trainee happened to get right
+      positions.forEach((pos, i) => {
+        if ((pos.type === "dialect" || pos.type === "length") &&
+            !traineeMismatches.some(m => m.i === i)) {
+          body += describePosition(pos, i);
+        }
+      });
     }
     showTrainingFeedback("Have another listen", body, { listen: true, reveal: trial.trainingAttempts >= 2 });
   }
+}
+
+// Frame a per-position note from the TRAINEE's perspective: what they marked
+// versus the truth. Used on a first miss so the feedback points at the
+// position the trainee actually got wrong, not just teaching moments.
+function describeTraineeMismatch(pos, idx, transcribed, judgedCorrect) {
+  const n = idx + 1;
+  const heard = (transcribed && transcribed !== "–") ? transcribed : null;
+  if (judgedCorrect && !pos.correct) {
+    // Trainee accepted it; truth says wrong
+    return `<div class="tf-row bad"><span class="tf-phon">${n}: /${pos.target}/</span>` +
+      `<span>You marked this correct, but the client ${pos.type === "omission"
+        ? "omitted this sound" : `said /${pos.response}/`} — it scores incorrect.</span></div>`;
+  }
+  // Trainee rejected it; truth says correct
+  let why;
+  if (pos.type === "dialect") why = pos.message || "this is a valid regional variant.";
+  else if (pos.type === "length") why = "vowel-length differences aren't penalised.";
+  else why = "the client did say the target sound here.";
+  return `<div class="tf-row bad"><span class="tf-phon">${n}: /${pos.target}/</span>` +
+    `<span>You marked this incorrect${heard ? ` (you heard /${heard}/)` : ""}, but it scores correct — ${why}</span></div>`;
 }
 
 function showTrainingFeedback(title, bodyHtml, opts = {}) {
@@ -853,6 +1043,13 @@ function bindEvents() {
   // Training mode
   if ($("trainingBtn")) $("trainingBtn").onclick = openTrainingPicker;
   if ($("exitTrainingBtn")) $("exitTrainingBtn").onclick = exitTraining;
+  if ($("clearClientBtn")) $("clearClientBtn").onclick = clearClient;
+  if ($("mitaBtn")) $("mitaBtn").onclick = openMitaDialog;
+  if ($("mitaSaveBtn")) $("mitaSaveBtn").onclick = saveMitaDialog;
+  ["clientName","clientId","clientDob"].forEach(id => {
+    const el = $(id);
+    if (el) el.addEventListener("input", updateClearClientBtn);
+  });
   if ($("replayResponseBtn")) $("replayResponseBtn").onclick = () => { stopCurrentStimulusIfAny(); playClientResponse(); };
   if ($("tfPlayKupuBtn")) $("tfPlayKupuBtn").onclick = () => playKupuOnly();
   if ($("tfPlayResponseBtn")) $("tfPlayResponseBtn").onclick = () => { stopCurrentStimulusIfAny(); playClientResponse(); };
@@ -2704,6 +2901,7 @@ function autoSaveJson() {
     },
     calibration: state.calibration,
     queue: state.queue,
+    dialectSubstitutions: state.dialectSubstitutions,
     results: state.results,
     summaries: listSummaries()
   };

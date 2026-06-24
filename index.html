@@ -29,7 +29,8 @@
               <div class="card-header-row">
                 <h2>Client</h2>
                 <div class="training-controls">
-                  <button id="trainingBtn" type="button" class="secondary">🎓 Training mode…</button>
+                  <button id="clearClientBtn" type="button" class="secondary">Clear client</button>
+                  <button id="trainingBtn" type="button" class="secondary">🎓 Train scoring</button>
                   <select id="trainingClientSelect" hidden>
                     <option value="">Choose a training client…</option>
                   </select>
@@ -42,11 +43,18 @@
                 <label>NHI / ID <input id="clientId" placeholder="NHI number"></label>
                 <label>Date of birth <input id="clientDob" type="date"></label>
                 <label>Test date <input id="sessionDate" type="date"></label>
+              </div>
+              <label>Location / facility <input id="facilityName" placeholder="e.g. Northland DHB"></label>
+              <label>
+                <span class="notes-label-row">Notes
+                  <button id="mitaBtn" type="button" class="mita-btn secondary">Mita / dialect…</button>
+                </span>
+                <textarea id="sessionNotes" rows="2"></textarea>
+              </label>
+              <div class="grid two">
                 <label>Clinician <input id="clinician" placeholder="Full name"></label>
                 <label>Role <input id="clinicianRole" placeholder="e.g. Audiologist"></label>
               </div>
-              <label>Location / facility <input id="facilityName" placeholder="e.g. Northland DHB"></label>
-              <label>Notes <textarea id="sessionNotes" rows="2"></textarea></label>
             </div>
 
             <div class="card">
@@ -375,6 +383,33 @@
     </form>
   </dialog>
 
+  <dialog id="mitaDialog">
+    <form method="dialog" class="dialog-card mita-dialog-card">
+      <h2 id="mitaTitle">Mita / dialect substitutions</h2>
+      <p class="hint" id="mitaIntro">Select the realisations this client uses. Selected substitutions score as correct wherever the target phoneme occurs.</p>
+      <div class="mita-groups">
+        <div class="mita-group">
+          <h4>ng <span class="mita-target">/ŋ/</span></h4>
+          <div class="mita-toggle-row">
+            <button type="button" class="mita-toggle" data-target="ŋ" data-sub="k">/ŋ/ → /k/</button>
+            <button type="button" class="mita-toggle" data-target="ŋ" data-sub="n">/ŋ/ → /n/</button>
+          </div>
+        </div>
+        <div class="mita-group">
+          <h4>wh <span class="mita-target">/f/</span></h4>
+          <div class="mita-toggle-row">
+            <button type="button" class="mita-toggle" data-target="f" data-sub="w">/f/ → /w/</button>
+            <button type="button" class="mita-toggle" data-target="f" data-sub="h">/f/ → /h/</button>
+          </div>
+        </div>
+      </div>
+      <menu>
+        <button id="mitaCancelBtn" value="cancel" class="secondary">Cancel</button>
+        <button id="mitaSaveBtn" type="button">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
   <dialog id="abandonDialog">
     <form method="dialog" class="dialog-card">
       <h2>Abandon this list?</h2>
@@ -457,6 +492,71 @@
     .tf-phon { font-weight: 800; font-size: 1.05rem; }
     .tf-summary { font-weight: 800; margin: .4rem 0 .55rem; font-size: 1.05rem; }
     .tf-teach { color: #92400e; }
+
+    /* Mita / dialect substitutions */
+    .notes-label-row {
+      display: inline-flex;
+      align-items: center;
+      gap: .6rem;
+    }
+    .mita-btn {
+      font-weight: 650;
+      font-size: .82rem;
+      line-height: 1;
+      padding: .28rem .6rem;
+      border-radius: 7px;
+    }
+    .mita-dialog-card { min-width: min(460px, 92vw); }
+    .mita-groups {
+      display: grid;
+      gap: .9rem;
+      margin: .8rem 0 .4rem;
+    }
+    .mita-group {
+      border: 1px solid var(--line, #d7d7d7);
+      border-radius: 12px;
+      padding: .6rem .7rem .75rem;
+    }
+    .mita-group h4 {
+      margin: 0 0 .5rem;
+      font-size: 1rem;
+      font-weight: 800;
+      display: flex;
+      align-items: baseline;
+      gap: .45rem;
+    }
+    .mita-group h4 .mita-target {
+      font-weight: 500;
+      color: #666;
+      font-size: .9rem;
+    }
+    .mita-toggle-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: .55rem;
+    }
+    .mita-toggle {
+      background: #f3f3f3;
+      color: #222;
+      border: 2px solid #d0d0d0;
+      border-radius: 10px;
+      padding: .65rem .4rem;
+      font-size: 1.1rem;
+      font-weight: 750;
+      cursor: pointer;
+    }
+    .mita-toggle.active {
+      background: #ecfdf3;
+      color: #166534;
+      border-color: #15803d;
+    }
+    .mita-dialog-card.readonly .mita-toggle {
+      cursor: default;
+      opacity: .92;
+    }
+    .mita-dialog-card.readonly .mita-toggle:not(.active) {
+      opacity: .5;
+    }
   </style>
 
   <script src="app.js"></script>
