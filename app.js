@@ -1298,6 +1298,65 @@ function pickKoreroMai() {
   return Math.random() < .5 ? "KōreroMai_01" : "KōreroMai_02";
 }
 
+// Route an input node to the left ear, right ear, or both, without the
+// equal-power boost a StereoPannerNode applies. The input is collapsed to mono
+// (both source channels averaged to −6 dB each, summing to unity for correlated
+// stereo — i.e. equal-energy dual-mono lands at the same level the calibration
+// path produces) and then sent only to the chosen output channel(s) at unity.
+// Returns a handle exposing `.setEar()` so live callers (masker) can re-route.
+function makeEarRouter(ctx, inputNode, ear) {
+  // Route to the test ear(s) by muting the non-test channel and passing the test
+  // channel through UNCHANGED. No panning, no summing, no down-mixing, no level
+  // compensation of any kind: the non-test ear is multiplied by zero and the test
+  // ear is byte-for-byte the source channel.
+  //
+  // Channel handling: a mono source must be treated as dual-mono (identical L and
+  // R) so that single-ear presentation of a mono file plays in the test ear at
+  // the same level as a stereo file — never silent. A ChannelSplitterNode uses
+  // "discrete" interpretation, under which a mono input would map to ch0=signal,
+  // ch1=silence (silencing the right ear for mono files). So we first pass the
+  // source through a GainNode explicitly configured for a "speakers" up-mix to
+  // 2 channels: mono → duplicated into L and R at unchanged level, stereo → left
+  // untouched. Then split, mute the non-test channel, pass the test channel
+  // through unchanged, and merge back to stereo.
+  const stereoize = ctx.createGain();
+  stereoize.channelCount = 2;
+  stereoize.channelCountMode = "explicit";
+  stereoize.channelInterpretation = "speakers";
+  inputNode.connect(stereoize);
+
+  const splitter = ctx.createChannelSplitter(2);
+  const leftGain = ctx.createGain();
+  const rightGain = ctx.createGain();
+  const merger = ctx.createChannelMerger(2);
+  stereoize.connect(splitter);
+  splitter.connect(leftGain, 0).connect(merger, 0, 0);
+  splitter.connect(rightGain, 1).connect(merger, 0, 1);
+  merger.connect(ctx.destination);
+
+  const apply = (e) => {
+    leftGain.gain.value  = (e === "left"  || e === "binaural") ? 1 : 0;
+    rightGain.gain.value = (e === "right" || e === "binaural") ? 1 : 0;
+  };
+  apply(ear);
+
+  // Shim so existing code that reads/writes `.pan.value` keeps working:
+  // setting a value <0 => left, >0 => right, 0 => binaural.
+  return {
+    _apply: apply,
+    setEar: apply,
+    get pan() {
+      return {
+        get value() {
+          const l = leftGain.gain.value, r = rightGain.gain.value;
+          return l && r ? 0 : l ? -1 : 1;
+        },
+        set value(v) { apply(v < 0 ? "left" : v > 0 ? "right" : "binaural"); }
+      };
+    }
+  };
+}
+
 function createRoutedAudio(url, ear, levelDbA, loop=false) {
   const ctx = ensureAudio();
   const el = new Audio(url);
@@ -1305,12 +1364,18 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
   el.preload = "auto";
   const source = ctx.createMediaElementSource(el);
   const gain = ctx.createGain();
-  const pan = ctx.createStereoPanner();
-
-  pan.pan.value = ear === "left" ? -1 : ear === "right" ? 1 : 0;
   gain.gain.value = gainForLevel(levelDbA);
 
-  source.connect(gain).connect(pan).connect(ctx.destination);
+  // Ear routing via a splitter/merger instead of StereoPannerNode.
+  // StereoPannerNode uses an equal-power law that, for a STEREO source panned
+  // hard to one ear, sums both input channels into the output channel — a boost
+  // of up to +6 dB in that ear relative to the un-panned calibration path. That
+  // makes single-ear presentation measure hot even though the on-screen level is
+  // correct. Here we first collapse the (possibly stereo) source to mono at
+  // unity, then feed only the selected output channel(s), so the in-ear level
+  // matches the calibration/test path exactly for left, right and binaural.
+  source.connect(gain);
+  const pan = makeEarRouter(ctx, gain, ear);
   const node = { el, source, gain, pan, loop };
 
   if (!loop) {
@@ -2246,14 +2311,16 @@ async function startMasker() {
     const buffer = await decodeFirstAvailable(["noise","masking"]);
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
-    const pan = ctx.createStereoPanner();
 
     source.buffer = buffer;
     source.loop = true;
     gain.gain.value = gainForLevel(Number($("maskLevel").value));
-    pan.pan.value = $("maskEar").value === "left" ? -1 : $("maskEar").value === "right" ? 1 : 0;
+    const maskEarVal = $("maskEar").value;
+    // Same splitter/merger ear routing as the stimulus path, so the masker's
+    // in-ear level matches its on-screen dB regardless of ear (no panner boost).
+    const pan = makeEarRouter(ctx, gain, maskEarVal === "left" ? "left" : maskEarVal === "right" ? "right" : "binaural");
 
-    source.connect(gain).connect(pan).connect(ctx.destination);
+    source.connect(gain);
     source.start();
 
     state.audio.masker = { bufferSource: source, gain, pan, isBufferLoop: true };
