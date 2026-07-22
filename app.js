@@ -1557,7 +1557,7 @@ async function toggleCalibration() {
     alert("No calibration sound file found.\nPlease add calib.wav to the sounds/ folder.");
     return;
   }
-  alert("Turn your device volume all the way up, then tap OK to play the calibration tone.");
+  alert("Turn your device volume all the way up, then tap OK to play the calibration noise.");
   const source = state.audio.ctx.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
