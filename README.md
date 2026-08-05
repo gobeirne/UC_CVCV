@@ -7,7 +7,7 @@ Open `index.html` directly for local testing, or host the folder on GitHub Pages
 
 ## Languages
 
-**Te reo Māori** — CVCV words (4 phonemes), a separate "Kōrero mai…" carrier
+**Te reo Māori** — CVCV kupu (4 phonemes), a separate "Kōrero mai…" carrier
 phrase, vowel-length and dialect equivalence, an optional advanced response-phoneme
 picker, and Training mode (below).
 
@@ -25,13 +25,72 @@ switched at any time between lists.
 
 ## Sound files
 
-- **Te reo Māori** files go in `sounds/` and are matched using the text before the
-  first underscore, so `hēki_+1.7dB.wav` is resolved as `hēki`. The app tries the
-  known filenames first, then `.mp3` and `.wav`.
-- **NZ English** files go in `sounds_cvc/` and are matched by their `NNNN_Word`
-  stem — the list/item number is in the filename itself (e.g. `0101_Pass.wav` is
-  list 1, item 1), trying `.wav` then `.mp3`. The carrier phrase is part of each
-  recording.
+### Te reo Māori — `sounds/`
+
+112 files, all `.mp3`, all filtered to the ILTASS (international long-term
+average speech spectrum):
+
+| Files | What |
+|---|---|
+| 100 | Kupu, one per word in the ten lists — named exactly for the kupu, e.g. `hēki.mp3` |
+| 11 | Carrier phrase, `kōrero_mai_01.mp3` … `kōrero_mai_11.mp3`, chosen at random per trial |
+| 1 | `noise.mp3` — calibration signal and masker |
+
+Filenames carry no calibration suffix. The earlier `hēki_+1.7dB.wav` convention
+is gone: the set is level-matched at source, so there is nothing per-file left to
+correct. The app still strips a trailing `_+1.7dB` when resolving a name, so
+legacy recordings dropped into `sounds/` continue to work. Resolution order is
+the known filename, then `.mp3`, then `.wav`.
+
+Note that names are matched on the *whole* stem, not the text before the first
+underscore — otherwise `kōrero_mai_01` would collapse to `kōrero`.
+
+### NZ English — `sounds_cvc/`
+
+Matched by `NNNN_Word` stem, with the list/item number in the filename itself
+(`0101_Pass.mp3` is list 1, item 1). Files are `.mp3`. Because casing is
+inconsistent across the recordings and static hosts are case-sensitive, the app
+tries the stem as listed, then a Capitalised variant, then an all-lowercase one.
+The carrier phrase is part of each recording.
+
+## Levels and calibration
+
+The Māori set has two properties that the level maths depends on:
+
+- All 100 kupu share one momentary loudness: **−22.5 LUFS**.
+- `noise.mp3` has a mean of **−25.85 dB(A)**, which is the average of the
+  momentary dB(A) values of those 100 kupu.
+
+Because those two figures coincide, measuring `noise.mp3` on the sound level
+meter measures the mean speech level directly. The dB(A) figure entered at
+calibration *is* the reference speech level — no offset sits between them. The
+relationship is recorded in `app.js` as `AUDIO_SPEC` and
+`SPEECH_NOISE_OFFSET_DB` (zero for this set). If the noise is ever re-rendered
+at a different level, `SPEECH_NOISE_OFFSET_DB` is the one number to change.
+
+To calibrate: turn device volume fully up, play the calibration noise, measure
+the output in dB(A), then stop and enter the value. Uncalibrated, everything
+plays at unity gain — still valid relative to itself, since the set is
+level-normalised, but with no absolute reference.
+
+The same coincidence puts the masker and stimulus dials on a common scale, so
+SNR is simply stimulus dB(A) minus masker dB(A). The masker status pill shows it
+live during a test.
+
+### Carrier randomisation
+
+The 11 carriers are drawn without replacement from a shuffled bag that reshuffles
+when empty, rejecting any reshuffle that would repeat a carrier across the seam.
+Over a ten-kupu list that gives an even spread with no back-to-back repeats —
+unlike an independent random pick, which would collide roughly once every 11
+trials.
+
+### Macrons
+
+Word lists and filenames are compared in NFC (pre-composed `ā` = U+0101). If a
+file is uploaded with decomposed macrons (NFD, common from macOS), the app falls
+back to the NFD spelling rather than failing to find it — the two spellings are
+indistinguishable in a directory listing, so the mismatch is otherwise invisible.
 
 ## Performance-intensity plot
 
@@ -84,6 +143,10 @@ Put training assets in `training/`:
      incorrect
 
    When a word has multiple recordings, one is chosen at random per trial.
+
+Response recordings play binaurally at a fixed comfortable level (65 dB(A) when
+calibrated), independent of the stimulus level, so the trainee always hears them
+clearly.
 
 Scoring rules applied automatically: long/short vowel pairs (e/eː etc.) are
 equivalent; dialect substitutions listed in the profile score as **correct**

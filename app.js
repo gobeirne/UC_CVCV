@@ -2,6 +2,7 @@
    Static, GitHub Pages friendly, local-file friendly.
    Put audio files in /sounds. The app resolves by the text before the first "_",
    trying the known filename first, then .mp3/.wav alternatives.
+   The current set is all .mp3, ILTASS-filtered and level-matched at source.
 */
 
 const MAORI_WORD_LISTS = {
@@ -182,9 +183,63 @@ function randomiseEnabled(langKey = state.language) {
   return !!(LANGUAGES[langKey] || LANGUAGES.maori).randomiseOrder;
 }
 
-const KNOWN_SOUND_FILES = [
-"hapū_+3.9dB.wav","hāte_-0.0dB.wav","hēki_+1.7dB.wav","heru_-1.3dB.wav","hine_-1.0dB.wav","hinu_-2.6dB.wav","hipi_+4.4dB.wav","honu_-2.5dB.wav","hope_+1.6dB.wav","huri_+0.6dB.wav","kaha_+3.2dB.wav","kare_-4.0dB.wav","keke_+1.5dB.wav","kēmu_-0.0dB.wav","kīngi_-2.1dB.wav","kino_-1.9dB.wav","koha_-2.2dB.wav","kohu_-2.7dB.wav","KōreroMai_01_+1.6dB.wav","KōreroMai_02_+2.2dB.wav","kupu_+1.7dB.wav","kurī_+0.2dB.wav","mangu_-2.2dB.wav","manu_-0.4dB.wav","mata_+1.1dB.wav","mihi_+1.9dB.wav","miro_-0.7dB.wav","mīti_+0.2dB.wav","mōku_+0.5dB.wav","moni_-1.1dB.wav","muku_-0.3dB.wav","mutu_-0.3dB.wav","nama_-0.2dB.wav","nāna_-2.1dB.wav","nēhi_-1.8dB.wav","neke_+4.0dB.wav","nēra_-1.1dB.wav","ngaki_+0.5dB.wav","ngako_+2.8dB.wav","ngaro_-3.9dB.wav","ngaru_-3.2dB.wav","ngata_+3.3dB.wav","ngāti_+2.0dB.wav","ngenge_-1.8dB.wav","ngeru_-1.8dB.wav","ngira_-2.8dB.wav","ngutu_+3.4dB.wav","niho_+2.1dB.wav","noho_+0.4dB.wav","noke_+1.6dB.wav","nōku_+2.3dB.wav","nōna_-1.7dB.wav","pahi_-0.9dB.wav","pāmu_-3.8dB.wav","papa_+2.5dB.wav","peka_-1.7dB.wav","pēpi_-1.4dB.wav","pere_-1.0dB.wav","piko_+0.6dB.wav","pipi_-1.5dB.wav","poto_+3.4dB.wav","pune_+0.5dB.wav","rama_-2.7dB.wav","rangi_+0.0dB.wav","rata_-4.2dB.wav","reka_-1.9dB.wav","rima_-2.3dB.wav","rimu_-1.9dB.wav","rōpū_+2.9dB.wav","roto_-0.3dB.wav","rūma_-1.6dB.wav","runga_+0.0dB.wav","take_+2.2dB.wav","tana_-2.7dB.wav","tāne_-1.7dB.wav","tangi_-1.1dB.wav","tapu_-0.8dB.wav","tēpu_+3.0dB.wav","tiki_+1.4dB.wav","tino_-2.0dB.wav","tiro_+4.9dB.wav","tuku_+4.8dB.wav","waha_+5.1dB.wav","wāhi_-6.1dB.wav","waho_-1.4dB.wav","waka_+0.4dB.wav","wehi_-0.3dB.wav","weka_-0.8dB.wav","wera_+0.4dB.wav","wētā_+0.9dB.wav","whana_-0.4dB.wav","whanga_-0.1dB.wav","whare_-3.2dB.wav","whata_-1.4dB.wav","whatu_+1.8dB.wav","whero_-2.5dB.wav","whetū_+2.2dB.wav","whiti_+3.0dB.wav","whitu_+3.9dB.wav","whiwhi_+4.4dB.wav","wiki_+0.0dB.wav","wiri_-1.7dB.wav"
+/* ── Audio set ────────────────────────────────────────────────────
+   Every file in sounds/ is .mp3, ILTASS-filtered, and named for its
+   kupu with no calibration suffix — the whole set is level-matched at
+   source, so nothing here needs per-file gain correction.
+
+   Levels (see AUDIO_SPEC below):
+   · all 100 kupu share one momentary loudness (−22.5 LUFS);
+   · noise.mp3 sits at −25.85 dB(A) mean, which is the *average of the
+     momentary dB(A)* of those 100 kupu.
+   So measuring noise.mp3 on the meter measures the mean speech level
+   directly: the calibration figure the clinician types in is the
+   reference speech level, with no offset in between. */
+
+const KOREROMAI_FILES = [
+"kōrero_mai_01.mp3","kōrero_mai_02.mp3","kōrero_mai_03.mp3","kōrero_mai_04.mp3",
+"kōrero_mai_05.mp3","kōrero_mai_06.mp3","kōrero_mai_07.mp3","kōrero_mai_08.mp3",
+"kōrero_mai_09.mp3","kōrero_mai_10.mp3","kōrero_mai_11.mp3"
 ];
+
+const CALIBRATION_NOISE_BASE = "noise";
+const CALIBRATION_NOISE_FILE = `${CALIBRATION_NOISE_BASE}.mp3`;
+
+const KUPU_SOUND_FILES = [
+"hapū.mp3","hāte.mp3","hēki.mp3","heru.mp3","hine.mp3","hinu.mp3","hipi.mp3","honu.mp3",
+"hope.mp3","huri.mp3","kaha.mp3","kare.mp3","keke.mp3","kēmu.mp3","kīngi.mp3","kino.mp3",
+"koha.mp3","kohu.mp3","kupu.mp3","kurī.mp3","mangu.mp3","manu.mp3","mata.mp3","mihi.mp3",
+"miro.mp3","mīti.mp3","mōku.mp3","moni.mp3","muku.mp3","mutu.mp3","nama.mp3","nāna.mp3",
+"nēhi.mp3","neke.mp3","nēra.mp3","ngaki.mp3","ngako.mp3","ngaro.mp3","ngaru.mp3","ngata.mp3",
+"ngāti.mp3","ngenge.mp3","ngeru.mp3","ngira.mp3","ngutu.mp3","niho.mp3","noho.mp3","noke.mp3",
+"nōku.mp3","nōna.mp3","pahi.mp3","pāmu.mp3","papa.mp3","peka.mp3","pēpi.mp3","pere.mp3",
+"piko.mp3","pipi.mp3","poto.mp3","pune.mp3","rama.mp3","rangi.mp3","rata.mp3","reka.mp3",
+"rima.mp3","rimu.mp3","rōpū.mp3","roto.mp3","rūma.mp3","runga.mp3","take.mp3","tana.mp3",
+"tāne.mp3","tangi.mp3","tapu.mp3","tēpu.mp3","tiki.mp3","tino.mp3","tiro.mp3","tuku.mp3",
+"waha.mp3","wāhi.mp3","waho.mp3","waka.mp3","wehi.mp3","weka.mp3","wera.mp3","wētā.mp3",
+"whana.mp3","whanga.mp3","whare.mp3","whata.mp3","whatu.mp3","whero.mp3","whetū.mp3","whiti.mp3",
+"whitu.mp3","whiwhi.mp3","wiki.mp3","wiri.mp3"
+];
+
+const KNOWN_SOUND_FILES = [...KUPU_SOUND_FILES, ...KOREROMAI_FILES, CALIBRATION_NOISE_FILE];
+
+/* Documented properties of the audio set. These are not knobs to twiddle —
+   they record what the files actually are, so the level maths below can be
+   read and checked against the recordings. */
+const AUDIO_SPEC = {
+  spectrum: "ILTASS",             // all files filtered to the long-term average speech spectrum
+  kupuMomentaryLufs: -22.5,       // identical for all 100 kupu
+  noiseMeanDbA: -25.85,           // mean dB(A) of noise.mp3
+  meanKupuMomentaryDbA: -25.85,   // mean of the 100 kupu momentary dB(A) values
+  kupuCount: 100,
+  carrierCount: 11
+};
+
+/* Difference between the calibration noise and the mean speech level, in dB.
+   Zero by construction for this set (the two figures above are equal). It
+   exists so that if the noise is ever re-rendered at a different level, this
+   is the single number to change. */
+const SPEECH_NOISE_OFFSET_DB = AUDIO_SPEC.meanKupuMomentaryDbA - AUDIO_SPEC.noiseMeanDbA;
 
 const PHONEMES = {
   C: ["p","t","k","m","n","ŋ","w","f","ɾ","h"],
@@ -223,7 +278,10 @@ const state = {
     calNode: null,
     testCalNode: null,
     activeStimuli: [],
-    decodedBuffers: {}
+    decodedBuffers: {},
+    // Shuffle bag for the 11 KōreroMai carriers (see pickKoreroMai).
+    koreroBag: [],
+    lastKoreroMai: null
   }
 };
 
@@ -1254,25 +1312,37 @@ function ensureAudio() {
   return state.audio.ctx;
 }
 
+// Macrons can be stored either pre-composed (ā = U+0101, NFC) or as a vowel
+// plus a combining macron (NFD). The word lists are NFC; a filesystem or
+// upload path may hand back either. Compare and build URLs in NFC, and keep
+// NFD as a fallback candidate so a differently-encoded upload still resolves.
+function nfc(s) { return typeof s === "string" ? s.normalize("NFC") : s; }
+function nfd(s) { return typeof s === "string" ? s.normalize("NFD") : s; }
+
 function soundKey(filename) {
-  // Strip path, extension, and final calibration suffix only.
-  // This preserves meaningful underscores in names like KōreroMai_01_+1.6dB.wav.
-  return filename
+  // Strip path and extension. The trailing "_+1.7dB" strip is kept only for
+  // legacy recordings — current files carry no calibration suffix — and is
+  // safe for names like kōrero_mai_01.mp3, whose underscores are meaningful.
+  return nfc(filename)
     .replace(/^.*\//, "")
     .replace(/\.(mp3|wav)$/i, "")
     .replace(/_[+-]?\d+(?:\.\d+)?dB$/i, "");
 }
 
 function fileForWord(word) {
-  const exact = KNOWN_SOUND_FILES.find(f => soundKey(f) === word);
+  const exact = KNOWN_SOUND_FILES.find(f => soundKey(f) === nfc(word));
   if (exact) return `sounds/${exact}`;
-  return `sounds/${word}.mp3`;
+  return `sounds/${nfc(word)}.mp3`;
 }
 
 function candidatesForBase(base) {
-  // Māori bases are the word/known stem; match known files, then .wav/.mp3.
-  const known = KNOWN_SOUND_FILES.filter(f => soundKey(f) === base).map(f => `sounds/${f}`);
-  return [...known, `sounds/${base}.wav`, `sounds/${base}.mp3`];
+  // Māori bases are the word/known stem. Known filenames first, then .mp3
+  // (the whole current set is mp3, so try it before the legacy .wav), then
+  // the NFD spelling as a last resort.
+  const key = nfc(base);
+  const known = KNOWN_SOUND_FILES.filter(f => soundKey(f) === key).map(f => `sounds/${f}`);
+  const fallbacks = [`sounds/${key}.mp3`, `sounds/${key}.wav`, `sounds/${nfd(base)}.mp3`];
+  return [...new Set([...known, ...fallbacks])];
 }
 
 // English stems are NNNN_Word (e.g. "0301_Pies"). The recordings are all .mp3,
@@ -1294,8 +1364,31 @@ function englishCandidates(stem) {
   return stems.map(s => `${ENGLISH_SOUND_DIR}/${s}.mp3`);
 }
 
+// Randomise the carrier across all 11 recordings. A plain Math.random() pick
+// clusters — with 11 files you would hear the same carrier twice in a row
+// roughly once every 11 trials, which a listener notices. Instead we draw
+// without replacement from a shuffled bag and reshuffle when it empties,
+// rejecting a reshuffle that would repeat the carrier across the seam. Over a
+// 10-kupu list that gives an even spread with no back-to-back repeats.
 function pickKoreroMai() {
-  return Math.random() < .5 ? "KōreroMai_01" : "KōreroMai_02";
+  const bag = state.audio.koreroBag;
+  if (!bag.length) {
+    const keys = KOREROMAI_FILES.map(soundKey);
+    do { shuffleInPlace(keys); }
+    while (keys.length > 1 && keys[keys.length - 1] === state.audio.lastKoreroMai);
+    state.audio.koreroBag = keys;
+  }
+  const pick = state.audio.koreroBag.pop();
+  state.audio.lastKoreroMai = pick;
+  return pick;
+}
+
+function shuffleInPlace(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }
 
 // Route an input node to the left ear, right ear, or both, without the
@@ -1399,11 +1492,17 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
 
 function gainForLevel(levelDbA) {
   if (state.calibration.isCalibrated && state.calibration.measuredDbA !== null) {
-    const attenuation = Number(state.calibration.measuredDbA) - Number(levelDbA);
+    // measuredDbA is the meter reading for noise.mp3 at unity gain. Because the
+    // noise and the mean kupu sit at the same dB(A) (SPEECH_NOISE_OFFSET_DB is
+    // 0 for this set), that reading is also the unity-gain speech level, so the
+    // attenuation needed to land on the requested level is a plain subtraction.
+    const unityGainSpeechDbA = Number(state.calibration.measuredDbA) + SPEECH_NOISE_OFFSET_DB;
+    const attenuation = unityGainSpeechDbA - Number(levelDbA);
     return Math.pow(10, -attenuation / 20);
   }
-  // Uncalibrated: all files are already level-normalised relative to each other,
-  // so play everything at unity gain and let device volume control the output.
+  // Uncalibrated: every kupu shares one momentary loudness (−22.5 LUFS) and the
+  // noise is matched to their mean, so the whole set is already level-normalised
+  // relative to itself. Play at unity and let device volume set the output.
   return 1.0;
 }
 
@@ -1413,7 +1512,7 @@ async function playFirstAvailable(bases, ear, levelDbA, loop=false) {
     const urls = base.includes("/") ? [base] : candidatesForBase(base);
     for (const url of urls) {
       // Confirm the file actually exists before trying to play it. Probing with
-      // fetch makes the .wav→.mp3 fallback reliable (a missing extension is a
+      // fetch makes the extension fallback reliable (a missing extension is a
       // clean 404 here, not an unreliable HTMLAudioElement play() rejection)
       // and surfaces real case-sensitivity mismatches instead of masking them.
       let exists = true;
@@ -1552,12 +1651,12 @@ async function toggleCalibration() {
   ensureAudio();
   let buffer;
   try {
-    buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
+    buffer = await decodeFirstAvailable([CALIBRATION_NOISE_BASE, "calib", "masking"]);
   } catch {
-    alert("No calibration sound file found.\nPlease add calib.wav to the sounds/ folder.");
+    alert("No calibration sound file found.\nPlease add noise.mp3 to the sounds/ folder.");
     return;
   }
-  alert("Turn your device volume all the way up, then tap OK to play the calibration noise.");
+  alert("Turn your device volume all the way up, then tap OK to play the calibration noise.\n\nnoise.mp3 is ILTASS-filtered and sits at the mean level of the 100 kupu, so the dB(A) you measure is the speech reference level.");
   const source = state.audio.ctx.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
@@ -1582,7 +1681,7 @@ async function testCalibratedSound() {
 
   let buffer;
   try {
-    buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
+    buffer = await decodeFirstAvailable([CALIBRATION_NOISE_BASE, "calib", "masking"]);
   } catch {
     alert("No calibration sound file found.");
     return;
@@ -2265,12 +2364,32 @@ async function playCurrent(withCarrier) {
   }
 }
 
+// Speech-to-noise ratio for the current trial, in dB, or null if not maskable.
+// Valid as a plain subtraction only because noise.mp3 is matched to the mean
+// kupu level (SPEECH_NOISE_OFFSET_DB === 0): both dial settings mean the same
+// thing on the meter, so their difference is the SNR.
+function currentSnrDb() {
+  if (!$("maskEar") || $("maskEar").value === "off") return null;
+  const q = currentQueueItem();
+  if (!q) return null;
+  const masker = Number($("maskLevel").value);
+  if (!Number.isFinite(masker)) return null;
+  return Number(q.levelDbA) - masker + SPEECH_NOISE_OFFSET_DB;
+}
+
+function formatSnr(snr) {
+  return `${snr > 0 ? "+" : ""}${Math.round(snr * 10) / 10} dB SNR`;
+}
+
 function setMaskerIndicator(isOn) {
   const el = $("maskerStatus");
   if (!el) return;
   el.classList.toggle("on", !!isOn);
   el.classList.toggle("off", !isOn);
-  el.textContent = isOn ? "Masker playing" : "Masker off";
+  const snr = isOn ? currentSnrDb() : null;
+  el.textContent = isOn
+    ? (snr === null ? "Masker playing" : `Masker playing — ${formatSnr(snr)}`)
+    : "Masker off";
 }
 
 function setStimulusIndicator(isOn, label) {
@@ -2308,7 +2427,7 @@ async function startMasker() {
   if (state.audio.masker) return;
   try {
     const ctx = ensureAudio();
-    const buffer = await decodeFirstAvailable(["noise","masking"]);
+    const buffer = await decodeFirstAvailable([CALIBRATION_NOISE_BASE, "calib", "masking"]);
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
 
@@ -2328,7 +2447,7 @@ async function startMasker() {
     setMaskerIndicator(true);
   } catch {
     try {
-      state.audio.masker = await playFirstAvailable(["noise","masking"], $("maskEar").value, Number($("maskLevel").value), true);
+      state.audio.masker = await playFirstAvailable([CALIBRATION_NOISE_BASE, "masking"], $("maskEar").value, Number($("maskLevel").value), true);
       $("toggleMaskBtn").textContent = "Stop masker";
       setMaskerIndicator(true);
     } catch {
@@ -2413,6 +2532,8 @@ function updateLevelDisplay() {
   if (!q) return;
   const el = $("levelNudgeLabel");
   if (el) el.textContent = String(q.levelDbA);
+  // The SNR shown on the masker pill depends on the stimulus level too.
+  if (state.audio.masker) setMaskerIndicator(true);
   updateRunningScore();
   refreshPI();
 }
