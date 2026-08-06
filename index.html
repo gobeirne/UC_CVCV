@@ -138,6 +138,7 @@
               </div>
               <div class="queue-toolbar">
                 <button id="addQueueBtn" type="button" class="small-add">+ Add list</button>
+                <button id="clearQueueBtn" type="button" class="small-add secondary" hidden>Clear queue</button>
               </div>
               <div id="queueChips" class="chips queue-chips"></div>
               <div class="actions">
@@ -559,6 +560,9 @@
     }
   </style>
 
+  <!-- config.js first: it defines window.APP_CONFIG, which app.js reads on load.
+       If it is missing, app.js falls back to its built-in defaults. -->
+  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -205,6 +205,46 @@ const KOREROMAI_FILES = [
 const CALIBRATION_NOISE_BASE = "noise";
 const CALIBRATION_NOISE_FILE = `${CALIBRATION_NOISE_BASE}.mp3`;
 
+/* ── Timing configuration ─────────────────────────────────────────
+   Defaults live here; config.js (loaded before this file) may override
+   any of them. If config.js is missing, malformed, or omits a key, the
+   default below is used — a broken config file must never stop a clinic
+   from running a test, so every value is validated and bad ones are
+   reported to the console and discarded rather than applied. */
+
+const DEFAULT_TIMING = {
+  carrierToKupuGapMs: 750,   // silence between carrier and kupu (Māori only)
+  kupuToResponseGapMs: 600,  // silence between kupu and training response
+  autoplayDelayMs: 250,      // let the trial paint before playback starts
+  maskerLeadInMs: 3100,      // masker alone before the first trial of a list
+  advanceDelayMs: 600        // fast-score correction window before advancing
+};
+
+// Upper bounds are sanity limits, not clinical ones: a stray keystroke that
+// turns 750 into 7500000 should be caught here rather than hanging a session.
+const TIMING_LIMITS = { min: 0, max: 30000 };
+
+const TIMING = (() => {
+  const cfg = (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.timing) || {};
+  const out = { ...DEFAULT_TIMING };
+  for (const [key, raw] of Object.entries(cfg)) {
+    if (!(key in DEFAULT_TIMING)) {
+      console.warn(`config.js: unknown timing key "${key}" ignored.`);
+      continue;
+    }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < TIMING_LIMITS.min || n > TIMING_LIMITS.max) {
+      console.warn(
+        `config.js: timing.${key} = ${JSON.stringify(raw)} is not a number between ` +
+        `${TIMING_LIMITS.min} and ${TIMING_LIMITS.max} ms — using default ${DEFAULT_TIMING[key]}.`
+      );
+      continue;
+    }
+    out[key] = n;
+  }
+  return Object.freeze(out);
+})();
+
 const KUPU_SOUND_FILES = [
 "hapū.mp3","hāte.mp3","hēki.mp3","heru.mp3","hine.mp3","hinu.mp3","hipi.mp3","honu.mp3",
 "hope.mp3","huri.mp3","kaha.mp3","kare.mp3","keke.mp3","kēmu.mp3","kīngi.mp3","kino.mp3",
@@ -281,7 +321,9 @@ const state = {
     decodedBuffers: {},
     // Shuffle bag for the 11 KōreroMai carriers (see pickKoreroMai).
     koreroBag: [],
-    lastKoreroMai: null
+    lastKoreroMai: null,
+    // Timer ids for audio queued to start after a gap (see schedulePlayback).
+    pendingPlayback: []
   }
 };
 
@@ -585,7 +627,7 @@ function schedulePendingAdvance() {
   state._pendingAdvance = setTimeout(() => {
     state._pendingAdvance = null;
     nextTrial();
-  }, 600);
+  }, TIMING.advanceDelayMs);
 }
 
 function cancelPendingAdvance() {
@@ -1191,6 +1233,7 @@ function bindEvents() {
   $("startBtn").onclick = startTesting;
 
   if ($("addQueueBtn")) $("addQueueBtn").onclick = () => openQueueDialog(null);
+  if ($("clearQueueBtn")) $("clearQueueBtn").onclick = clearQueue;
   if ($("queueSaveBtn")) $("queueSaveBtn").onclick = saveQueueDialog;
   if ($("queueDeleteBtn")) $("queueDeleteBtn").onclick = deleteQueueDialog;
   if ($("presentationCondition")) $("presentationCondition").onchange = updatePresentationConditionRouting;
@@ -1248,7 +1291,7 @@ function bindEvents() {
     const tag = document.activeElement.tagName;
     const inInput = ["INPUT","TEXTAREA","SELECT"].includes(tag);
 
-    // 0–N: fast score + auto-advance (600ms window for nav click interception)
+    // 0–N: fast score + auto-advance (TIMING.advanceDelayMs window for nav click interception)
     if (/^[0-9]$/.test(e.key) && Number(e.key) <= phonemeCount() && !inInput) {
       e.preventDefault();
       fastScore(Number(e.key));
@@ -1713,7 +1756,25 @@ function stopTestCalibratedSound() {
   if ($("testCalBtn")) $("testCalBtn").textContent = "Test Calibrated Sound";
 }
 
+// Timers that will start audio later (the carrier→kupu gap, the kupu→response
+// gap). Tracked so stopping playback also cancels anything still queued —
+// otherwise a 750 ms gap leaves a window in which a cancelled kupu still fires.
+function schedulePlayback(fn, delayMs) {
+  const id = setTimeout(() => {
+    state.audio.pendingPlayback = state.audio.pendingPlayback.filter(t => t !== id);
+    fn();
+  }, delayMs);
+  state.audio.pendingPlayback.push(id);
+  return id;
+}
+
+function cancelPendingPlayback() {
+  for (const id of state.audio.pendingPlayback || []) clearTimeout(id);
+  state.audio.pendingPlayback = [];
+}
+
 function stopCurrentStimulusIfAny() {
+  cancelPendingPlayback();
   for (const node of state.audio.activeStimuli || []) {
     try {
       node.el.pause();
@@ -1860,6 +1921,11 @@ function renderQueue() {
     box.appendChild(chip);
   });
 
+  // Nothing to clear when the queue is empty — hide the button rather than
+  // offering an action that would do nothing.
+  const clearBtn = $("clearQueueBtn");
+  if (clearBtn) clearBtn.hidden = state.queue.length === 0;
+
   const progress = $("progressIndicator");
   if (progress) progress.innerHTML = box.innerHTML;
 }
@@ -1903,6 +1969,38 @@ function deleteQueueDialog() {
   renderQueue();
   saveSession();
   $("queueDialog").close();
+}
+
+// Empty the queue. This removes *plans*, not *data*: results already scored
+// live in state.results and stay in the report and the CSV, so a clinician who
+// clears a queue mid-session does not lose what the client actually did. The
+// confirmation says so explicitly, because "clear" reads as "delete everything"
+// and someone hesitating over that button needs to know it isn't.
+function clearQueue() {
+  if (!state.queue.length) return;
+
+  const started = state.queue.filter(q => q.status !== "queued").length;
+  const withResults = state.queue.filter(q =>
+    state.results.some(r =>
+      r.listNumber === q.listNumber &&
+      r.listLevelDbA === q.levelDbA &&
+      (r.language || "maori") === (q.language || "maori")
+    )
+  ).length;
+
+  let message = `Remove all ${state.queue.length} queued list${state.queue.length === 1 ? "" : "s"}?`;
+  if (started || withResults) {
+    const n = Math.max(started, withResults);
+    message += `\n\n${n} of them ${n === 1 ? "has" : "have"} already been tested. `
+             + `Scores already recorded are kept — they stay in the report and the CSV. `
+             + `Only the queue itself is cleared.`;
+  }
+  if (!confirm(message)) return;
+
+  state.queue = [];
+  state.currentListIndex = -1;
+  renderQueue();
+  saveSession();
 }
 
 function moveQueueItem(from, to) {
@@ -1991,10 +2089,11 @@ function renderTrial() {
 
 function scheduleAutoplay() {
   // Let the UI paint first, then play the carrier phrase + kupu.
-  // For the first kupu in a list, if masking is active, give the masker at least 3 seconds first.
+  // For the first kupu in a list, if masking is active, run the masker alone first
+  // (TIMING.maskerLeadInMs). All delays here are set in config.js.
   const maskerOn = $("maskEar").value !== "off";
   const needsMaskerLeadIn = maskerOn && !state.firstTrialMaskerPrimed && state.currentTrialIndex === 0;
-  const delay = needsMaskerLeadIn ? 3100 : 250;
+  const delay = needsMaskerLeadIn ? TIMING.maskerLeadInMs : TIMING.autoplayDelayMs;
   if (needsMaskerLeadIn) state.firstTrialMaskerPrimed = true;
 
   setTimeout(() => {
@@ -2337,21 +2436,30 @@ async function playCurrent(withCarrier) {
   const chainResponse = (kupuNode) => {
     if (!trainingActive() || !trial.trainingFile) return;
     kupuNode.el.addEventListener("ended", () => {
-      setTimeout(() => {
+      schedulePlayback(() => {
         if ($("screen-test").classList.contains("active")) playClientResponse();
-      }, 600);
+      }, TIMING.kupuToResponseGapMs);
     }, { once: true });
   };
 
   try {
     if (withCarrier && L.hasCarrier) {
-      // Māori: play the separate KōreroMai carrier, then the kupu.
+      // Māori: play the separate KōreroMai carrier, wait the configured gap,
+      // then play the kupu. The gap is a real pause the clinician can hear, so
+      // it has to be cancellable — if they hit replay, change level, or move to
+      // another trial while it is running, stopCurrentStimulusIfAny() clears the
+      // pending timer and no stray kupu fires afterwards.
       const carrier = await playFirstAvailable([pickKoreroMai()], ear, level, false);
-      carrier.el.addEventListener("ended", async () => {
-        try {
-          const kupu = await playFirstAvailable(stimBases, ear, level, false);
-          chainResponse(kupu);
-        } catch {}
+      carrier.el.addEventListener("ended", () => {
+        schedulePlayback(async () => {
+          if (!$("screen-test").classList.contains("active")) return;
+          // The trial may have moved on during the gap; don't play a stale kupu.
+          if (currentTrial() !== trial) return;
+          try {
+            const kupu = await playFirstAvailable(stimBases, ear, level, false);
+            chainResponse(kupu);
+          } catch {}
+        }, TIMING.carrierToKupuGapMs);
       }, { once: true });
     } else {
       // English: carrier is embedded in the file — just play the file.

@@ -572,8 +572,19 @@ menu {
 .queue-toolbar {
   display: flex;
   justify-content: flex-start;
+  gap: .4rem;
   margin: .35rem 0;
 }
+
+/* Clear queue is destructive but not the primary action, so it stays quiet
+   until hovered rather than sitting there in alarm red next to "+ Add list". */
+#clearQueueBtn { color: #7f1d1d; }
+#clearQueueBtn:hover:not(:disabled) {
+  background: #7f1d1d;
+  border-color: transparent;
+  color: #fff;
+}
+#clearQueueBtn[hidden] { display: none; }
 
 .small-add {
   padding: .4rem .75rem;
