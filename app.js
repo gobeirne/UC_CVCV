@@ -141,7 +141,7 @@ const LANGUAGES = {
     label: "Te reo Māori",
     lists: MAORI_WORD_LISTS,
     phonemeCount: 4,        // C V C V
-    hasCarrier: true,       // separate KōreroMai carrier file
+    hasCarrier: true,       // separate kōrero-mai carrier file (11 variants)
     hasTranslation: true,
     hasAdvanced: true,      // advanced response-phoneme picker available
     hasTraining: true,
@@ -183,7 +183,20 @@ function randomiseEnabled(langKey = state.language) {
 }
 
 const KNOWN_SOUND_FILES = [
-"hapū_+3.9dB.wav","hāte_-0.0dB.wav","hēki_+1.7dB.wav","heru_-1.3dB.wav","hine_-1.0dB.wav","hinu_-2.6dB.wav","hipi_+4.4dB.wav","honu_-2.5dB.wav","hope_+1.6dB.wav","huri_+0.6dB.wav","kaha_+3.2dB.wav","kare_-4.0dB.wav","keke_+1.5dB.wav","kēmu_-0.0dB.wav","kīngi_-2.1dB.wav","kino_-1.9dB.wav","koha_-2.2dB.wav","kohu_-2.7dB.wav","KōreroMai_01_+1.6dB.wav","KōreroMai_02_+2.2dB.wav","kupu_+1.7dB.wav","kurī_+0.2dB.wav","mangu_-2.2dB.wav","manu_-0.4dB.wav","mata_+1.1dB.wav","mihi_+1.9dB.wav","miro_-0.7dB.wav","mīti_+0.2dB.wav","mōku_+0.5dB.wav","moni_-1.1dB.wav","muku_-0.3dB.wav","mutu_-0.3dB.wav","nama_-0.2dB.wav","nāna_-2.1dB.wav","nēhi_-1.8dB.wav","neke_+4.0dB.wav","nēra_-1.1dB.wav","ngaki_+0.5dB.wav","ngako_+2.8dB.wav","ngaro_-3.9dB.wav","ngaru_-3.2dB.wav","ngata_+3.3dB.wav","ngāti_+2.0dB.wav","ngenge_-1.8dB.wav","ngeru_-1.8dB.wav","ngira_-2.8dB.wav","ngutu_+3.4dB.wav","niho_+2.1dB.wav","noho_+0.4dB.wav","noke_+1.6dB.wav","nōku_+2.3dB.wav","nōna_-1.7dB.wav","pahi_-0.9dB.wav","pāmu_-3.8dB.wav","papa_+2.5dB.wav","peka_-1.7dB.wav","pēpi_-1.4dB.wav","pere_-1.0dB.wav","piko_+0.6dB.wav","pipi_-1.5dB.wav","poto_+3.4dB.wav","pune_+0.5dB.wav","rama_-2.7dB.wav","rangi_+0.0dB.wav","rata_-4.2dB.wav","reka_-1.9dB.wav","rima_-2.3dB.wav","rimu_-1.9dB.wav","rōpū_+2.9dB.wav","roto_-0.3dB.wav","rūma_-1.6dB.wav","runga_+0.0dB.wav","take_+2.2dB.wav","tana_-2.7dB.wav","tāne_-1.7dB.wav","tangi_-1.1dB.wav","tapu_-0.8dB.wav","tēpu_+3.0dB.wav","tiki_+1.4dB.wav","tino_-2.0dB.wav","tiro_+4.9dB.wav","tuku_+4.8dB.wav","waha_+5.1dB.wav","wāhi_-6.1dB.wav","waho_-1.4dB.wav","waka_+0.4dB.wav","wehi_-0.3dB.wav","weka_-0.8dB.wav","wera_+0.4dB.wav","wētā_+0.9dB.wav","whana_-0.4dB.wav","whanga_-0.1dB.wav","whare_-3.2dB.wav","whata_-1.4dB.wav","whatu_+1.8dB.wav","whero_-2.5dB.wav","whetū_+2.2dB.wav","whiti_+3.0dB.wav","whitu_+3.9dB.wav","whiwhi_+4.4dB.wav","wiki_+0.0dB.wav","wiri_-1.7dB.wav"
+  "hapū.mp3","hāte.mp3","hēki.mp3","heru.mp3","hine.mp3","hinu.mp3","hipi.mp3","honu.mp3",
+  "hope.mp3","huri.mp3","kaha.mp3","kare.mp3","keke.mp3","kēmu.mp3","kīngi.mp3","kino.mp3",
+  "koha.mp3","kohu.mp3","kōrero_mai_01.mp3","kōrero_mai_02.mp3","kōrero_mai_03.mp3","kōrero_mai_04.mp3","kōrero_mai_05.mp3","kōrero_mai_06.mp3",
+  "kōrero_mai_07.mp3","kōrero_mai_08.mp3","kōrero_mai_09.mp3","kōrero_mai_10.mp3","kōrero_mai_11.mp3","kupu.mp3","kurī.mp3","mangu.mp3",
+  "manu.mp3","mata.mp3","mihi.mp3","miro.mp3","mīti.mp3","mōku.mp3","moni.mp3","muku.mp3",
+  "mutu.mp3","nama.mp3","nāna.mp3","nēhi.mp3","neke.mp3","nēra.mp3","ngaki.mp3","ngako.mp3",
+  "ngaro.mp3","ngaru.mp3","ngata.mp3","ngāti.mp3","ngenge.mp3","ngeru.mp3","ngira.mp3","ngutu.mp3",
+  "niho.mp3","noho.mp3","noise.mp3","noke.mp3","nōku.mp3","nōna.mp3","pahi.mp3","pāmu.mp3",
+  "papa.mp3","peka.mp3","pēpi.mp3","pere.mp3","piko.mp3","pipi.mp3","poto.mp3","pune.mp3",
+  "rama.mp3","rangi.mp3","rata.mp3","reka.mp3","rima.mp3","rimu.mp3","rōpū.mp3","roto.mp3",
+  "rūma.mp3","runga.mp3","take.mp3","tana.mp3","tāne.mp3","tangi.mp3","tapu.mp3","tēpu.mp3",
+  "tiki.mp3","tino.mp3","tiro.mp3","tuku.mp3","waha.mp3","wāhi.mp3","waho.mp3","waka.mp3",
+  "wehi.mp3","weka.mp3","wera.mp3","wētā.mp3","whana.mp3","whanga.mp3","whare.mp3","whata.mp3",
+  "whatu.mp3","whero.mp3","whetū.mp3","whiti.mp3","whitu.mp3","whiwhi.mp3","wiki.mp3","wiri.mp3"
 ];
 
 const PHONEMES = {
@@ -196,6 +209,7 @@ const state = {
   language: "maori",
   client: {},
   calibration: { method: null, measuredDbA: null, timestamp: null, isCalibrated: false, sliderMinDb: -100, sliderMaxDb: 0, currentSliderDb: 0, strandedLists: 0 },
+  preload: null,
   queue: [],
   currentListIndex: -1,
   currentTrialIndex: 0,
@@ -457,6 +471,9 @@ function init() {
   updateSetupResultsSummary();
   updateTrainingBadge();
   updateClearClientBtn();
+  startMaoriPreloadWhenIdle();
+  // If a restored session is already in English, warm that batch too.
+  if (state.language === "english") startEnglishPreloadIfNeeded();
 }
 
 // ── Clinic settings (device-persistent, separate from session) ──
@@ -758,6 +775,42 @@ function flashNextLocked() {
 
 const TRAINING_DIR = "training";
 const ENGLISH_SOUND_DIR = "sounds_cvc";
+
+// Literal on-disk CVC filenames, warmed when English mode is selected (see
+// the preloading section). Cross-checked against the English lexicon stems.
+const ENGLISH_PRELOAD_FILES = [
+  "0101_Pass.mp3","0102_Rule.mp3","0103_Cause.mp3","0104_Time.mp3",
+  "0105_Log.mp3","0106_Sick.mp3","0107_Mean.mp3","0108_Bed.mp3",
+  "0109_Hope.mp3","0110_Date.mp3","0201_Hall.mp3","0202_Come.mp3",
+  "0203_Bag.mp3","0204_Rose.mp3","0205_Suit.mp3","0206_Made.mp3",
+  "0207_Like.mp3","0208_Peace.mp3","0209_Dip.mp3","0210_Ten.mp3",
+  "0301_Pies.mp3","0302_Mock.mp3","0303_Room.mp3","0304_Dad.mp3",
+  "0305_Loan.mp3","0306_Beg.mp3","0307_Tell.mp3","0308_Keep.mp3",
+  "0309_Hiss.mp3","0310_Sought.mp3","0401_Boss.mp3","0402_Sip.mp3",
+  "0403_Pal.mp3","0404_Coat.mp3","0405_Rod.mp3","0406_Moon.mp3",
+  "0407_Hem.mp3","0408_Take.mp3","0409_League.mp3","0410_Dies.mp3",
+  "0501_Time.mp3","0502_Caught.mp3","0503_Beg.mp3","0504_Rid.mp3",
+  "0505_Loon.mp3","0506_Mop.mp3","0507_Doze.mp3","0508_Says.mp3",
+  "0509_Pack.mp3","0510_Heel.mp3","0601_Make.mp3","0602_Laws.mp3",
+  "0603_Rice.mp3","0604_bell.mp3","0605_Tote.mp3","0606_Cod.mp3",
+  "0607_Ham.mp3","0608_Deep.mp3","0609_Pig.mp3","0610_Soon.mp3",
+  "0701_Seal.mp3","0702_Dawn.mp3","0703_Boom.mp3","0704_Hog.mp3",
+  "0705_Toes.mp3","0706_Mid.mp3","0707_Cat.mp3","0708_Like.mp3",
+  "0709_Pep.mp3","0710_Race.mp3","0801_Hide.mp3","0802_Tame.mp3",
+  "0803_Rule.mp3","0804_Cause.mp3","0805_Big.mp3","0806_Sass.mp3",
+  "0807_Pope.mp3","0808_Don.mp3","0809_Meek.mp3","0810_Let.mp3",
+  "0901_Call.mp3","0902_Buys.mp3","0903_Same.mp3","0904_Miss.mp3",
+  "0905_Rot.mp3","0906_Hoop.mp3","0907_Load.mp3","0908_Peck.mp3",
+  "0909_Tag.mp3","0910_Dean.mp3","1001_Lean.mp3","1002_Hag.mp3",
+  "1003_Bed.mp3","1004_Sews.mp3","1005_Cop.mp3","1006_Root.mp3",
+  "1007_Pick.mp3","1008_Maim.mp3","1009_Toss.mp3","1010_Dial.mp3",
+  "1101_Lice.mp3","1102_Mall.mp3","1103_Tomb.mp3","1104_Bag.mp3",
+  "1105_Soap.mp3","1106_Rake.mp3","1107_Pen.mp3","1108_Keys.mp3",
+  "1109_Hid.mp3","1110_Dot.mp3","1201_Dike.mp3","1202_Ball.mp3",
+  "1203_Mace.mp3","1204_Rig.mp3","1205_Lose.mp3","1206_Sop.mp3",
+  "1207_Comb.mp3","1208_Ten.mp3","1209_Pad.mp3","1210_Heat.mp3",
+  "Speech Lists - Millenium Edition-01-1 kHz tone_left.mp3","Speech Lists - Millenium Edition-01-1 kHz tone_right.mp3","Speech Lists - Millenium Edition-13-CVC Words List 12_right.mp3"
+];
 const ALL_WORDS = new Set(Object.values(MAORI_WORD_LISTS).flat().map(w => w[0]));
 
 function trainingActive() { return !!state.training; }
@@ -1299,6 +1352,7 @@ function bindEvents() {
     }
   });
   $("testCalBtn").onclick = testCalibratedSound;
+  if ($("preloadAllBtn")) $("preloadAllBtn").onclick = preloadEverything;
   $("outputLevel").addEventListener("input", updateOutputLevelFromSlider);
   $("outputLevel").addEventListener("change", updateOutputLevelFromSlider);
   $("outputLevel").addEventListener("touchend", updateOutputLevelFromSlider);
@@ -1481,8 +1535,10 @@ function ensureAudio() {
 }
 
 function soundKey(filename) {
-  // Strip path, extension, and final calibration suffix only.
-  // This preserves meaningful underscores in names like KōreroMai_01_+1.6dB.wav.
+  // Strip path and extension to get the word/stem. The trailing-dB strip is a
+  // no-op on the current clean filenames (kept so legacy "_+1.6dB.wav" names,
+  // if any linger, still resolve). Underscores inside a name are preserved,
+  // e.g. kōrero_mai_01.
   return filename
     .replace(/^.*\//, "")
     .replace(/\.(mp3|wav)$/i, "")
@@ -1496,9 +1552,10 @@ function fileForWord(word) {
 }
 
 function candidatesForBase(base) {
-  // Māori bases are the word/known stem; match known files, then .wav/.mp3.
+  // Māori bases are the word/known stem. Try the known file first, then a bare
+  // .mp3 (the current format), then .wav as a legacy fallback.
   const known = KNOWN_SOUND_FILES.filter(f => soundKey(f) === base).map(f => `sounds/${f}`);
-  return [...known, `sounds/${base}.wav`, `sounds/${base}.mp3`];
+  return [...known, `sounds/${base}.mp3`, `sounds/${base}.wav`];
 }
 
 // English stems are NNNN_Word (e.g. "0301_Pies"). The recordings are all .mp3,
@@ -1520,8 +1577,184 @@ function englishCandidates(stem) {
   return stems.map(s => `${ENGLISH_SOUND_DIR}/${s}.mp3`);
 }
 
+/* ── Asset preloading ────────────────────────────────────────────────────
+   Warms the HTTP cache so the first presentation of a sound doesn't stall on a
+   download. Two batches, warmed at different times because they matter at
+   different times:
+
+   • "maori"   — the ~2 MB kupu set plus the eleven kōrero-mai carriers and the
+                 masker. Warmed eagerly on idle at startup. The carrier is chosen
+                 at random per kupu, so any of the eleven can be the very first
+                 sound a client hears; there's no way to know which to warm, so
+                 all of them go early. This is also the app's default mode.
+
+   • "english" — the ~10 MB CVC set. Warmed only when English mode is selected,
+                 not at startup: most sessions are te reo, English presents its
+                 words in fixed list order with the carrier embedded (so there's
+                 no "any file could be first" problem), and mode-selection gives
+                 ample lead time before the first word. Eagerly warming 10 MB on
+                 every load would tax metered tablet connections and delay the
+                 small Māori warm for the majority who never leave te reo.
+
+   A manual "prepare for offline" action warms both regardless, for a clinic
+   about to lose connectivity.
+
+   Modelled on the UC KTT preloader: it deliberately does NOT decode audio.
+   Playback here is via HTMLAudioElement (createMediaElementSource), and the app
+   probes each file with a HEAD request before playing, so warming the browser's
+   HTTP cache is exactly what makes first use instant. Web-Audio decodeAudioData
+   is also unreliable on a still-suspended AudioContext (it only unlocks on a
+   user gesture), so decoding stays lazy.
+
+   Each item settles on load, error OR timeout, so one missing file costs a
+   console warning rather than a hung preload. Failures are surfaced because a
+   clinic needs to know an asset is missing before a client is in the booth. */
+const PRELOAD_CONCURRENCY = 8;   // modest — this runs on tablets too
+const PRELOAD_TIMEOUT_MS  = 10000;
+
+// Māori audio, built from the list the app already ships (no separate manifest
+// to keep in sync). Includes the eleven carriers and the masker (noise.mp3).
+function maoriPreloadUrls() {
+  return KNOWN_SOUND_FILES.map(f => `sounds/${encodeURI(f)}`);
+}
+
+// English CVC audio. These are literal on-disk filenames under ENGLISH_SOUND_DIR
+// — cross-checked to match the lexicon stems exactly, so the warmed URL is the
+// same one the play path requests. The final three are the tone/list-recording
+// files; if they live somewhere other than ENGLISH_SOUND_DIR, adjust here.
+function englishPreloadUrls() {
+  return ENGLISH_PRELOAD_FILES.map(f => `${ENGLISH_SOUND_DIR}/${encodeURI(f)}`);
+}
+
+function warmOneAsset(url) {
+  return new Promise(resolve => {
+    let settled = false;
+    const done = ok => { if (!settled) { settled = true; clearTimeout(timer); resolve(ok); } };
+    const timer = setTimeout(() => { console.warn("[preload] timed out:", url); done(false); }, PRELOAD_TIMEOUT_MS);
+    if (/\.(png|jpe?g|webp|gif|svg)$/i.test(url)) {
+      const img = new Image();
+      img.onload = () => done(true);
+      img.onerror = () => { console.warn("[preload] image failed:", url); done(false); };
+      img.src = url;
+      if (img.decode) img.decode().then(() => done(true)).catch(() => {});
+    } else {
+      // Audio: warm the HTTP cache via a preloading <audio>. Any of these events
+      // means the bytes are in cache; error/stalled still settles so we move on.
+      const a = new Audio();
+      a.preload = "auto";
+      ["canplaythrough", "loadeddata", "loadedmetadata"].forEach(ev =>
+        a.addEventListener(ev, () => done(true), { once: true }));
+      a.addEventListener("error", () => { console.warn("[preload] sound failed:", url); done(false); }, { once: true });
+      a.src = url;
+      try { a.load(); } catch {}   // iOS needs the explicit kick
+    }
+  });
+}
+
+// Tracks which batches have run, so switching to English twice, or re-init,
+// doesn't restart a completed or in-flight warm.
+const _preloadState = { maori: "idle", english: "idle" };   // idle | running | done
+
+async function warmUrls(urls, onProgress) {
+  const list = Array.from(new Set(urls));
+  const total = list.length;
+  let done = 0, failed = 0;
+  const failures = [];
+  if (onProgress) onProgress({ phase: "start", total, done, failed });
+  let i = 0;
+  const worker = async () => {
+    while (i < list.length) {
+      const url = list[i++];
+      const ok = await warmOneAsset(url);
+      done++; if (!ok) { failed++; failures.push(url); }
+      if (onProgress) onProgress({ phase: "progress", total, done, failed, current: url });
+    }
+  };
+  const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const t0 = now();
+  await Promise.all(Array.from({ length: Math.min(PRELOAD_CONCURRENCY, total) }, worker));
+  const seconds = Number(((now() - t0) / 1000).toFixed(1));
+  const result = { total, done, failed, failures, seconds, at: new Date().toISOString() };
+  if (onProgress) onProgress({ phase: "done", ...result });
+  return result;
+}
+
+// Warm one named batch, at most once. Returns the result, or null if it was
+// already done/running.
+async function preloadBatch(name, urls, onProgress) {
+  if (_preloadState[name] !== "idle") return null;
+  _preloadState[name] = "running";
+  const label = name === "english" ? "English CVC" : "te reo";
+  try {
+    const r = await warmUrls(urls, onProgress);
+    _preloadState[name] = "done";
+    state.preload = { ...(state.preload || {}), [name]: r };
+    if (r.failed) console.warn(`[preload] ${label}: ${r.failed}/${r.total} missing —`, r.failures.slice(0, 12));
+    else console.log(`[preload] ${label}: ${r.done}/${r.total} warmed in ${r.seconds}s`);
+    return r;
+  } catch (e) {
+    _preloadState[name] = "idle";   // allow a retry
+    console.warn(`[preload] ${label} error:`, e);
+    return null;
+  }
+}
+
+// Māori batch: eager on idle at startup, never competing with first paint.
+function startMaoriPreloadWhenIdle() {
+  const urls = [...maoriPreloadUrls(), ...(state.clinicLogo ? [] : ["assets/UClogo.png"])];
+  const go = () => preloadBatch("maori", urls, s => renderPreloadStatus("maori", s));
+  if ("requestIdleCallback" in window) requestIdleCallback(go, { timeout: 4000 });
+  else setTimeout(go, 2000);
+}
+
+// English batch: triggered by setLanguage("english"). Runs on idle too so it
+// doesn't jank the mode-switch UI; the lead time to the first word is long.
+function startEnglishPreloadIfNeeded() {
+  if (_preloadState.english !== "idle") return;
+  const go = () => preloadBatch("english", englishPreloadUrls(), s => renderPreloadStatus("english", s));
+  if ("requestIdleCallback" in window) requestIdleCallback(go, { timeout: 4000 });
+  else setTimeout(go, 500);
+}
+
+// Manual "prepare for offline": warm whatever hasn't been warmed yet, both
+// batches, and report combined progress. Wired to #preloadAllBtn if present.
+async function preloadEverything() {
+  const btn = $("preloadAllBtn");
+  if (btn) btn.disabled = true;
+  const batches = [
+    ["maori", [...maoriPreloadUrls(), ...(state.clinicLogo ? [] : ["assets/UClogo.png"])]],
+    ["english", englishPreloadUrls()]
+  ];
+  for (const [name, urls] of batches) {
+    // Re-warm even if "done" so an offline-bound clinic can confirm the cache;
+    // temporarily reset the gate for this explicit action.
+    if (_preloadState[name] === "done") _preloadState[name] = "idle";
+    await preloadBatch(name, urls, s => renderPreloadStatus(name, s));
+  }
+  if (btn) btn.disabled = false;
+}
+
+// Optional status line — only paints if a #preloadStatus element exists.
+function renderPreloadStatus(batch, s) {
+  const el = $("preloadStatus");
+  if (!el) return;
+  const which = batch === "english" ? "English words" : "te reo sounds";
+  if (s.phase === "done") {
+    el.textContent = s.failed
+      ? `${which}: ${s.total - s.failed}/${s.total} cached (${s.failed} missing — see console)`
+      : `${which}: all ${s.total} cached for offline use`;
+  } else if (s.phase === "progress" || s.phase === "start") {
+    el.textContent = `Caching ${which}… ${s.done || 0}/${s.total}`;
+  }
+}
+
+// Eleven carrier recordings of "kōrero mai"; one is chosen at random per kupu so
+// the phrase doesn't become predictable over a list. Zero-padded to two digits
+// to match the filenames (kōrero_mai_01 … kōrero_mai_11).
+const KORERO_MAI_COUNT = 11;
 function pickKoreroMai() {
-  return Math.random() < .5 ? "KōreroMai_01" : "KōreroMai_02";
+  const n = 1 + Math.floor(Math.random() * KORERO_MAI_COUNT);
+  return `kōrero_mai_${String(n).padStart(2, "0")}`;
 }
 
 // Route an input node to the left ear, right ear, or both, without the
@@ -2593,7 +2826,7 @@ async function playCurrent(withCarrier) {
 
   try {
     if (withCarrier && L.hasCarrier) {
-      // Māori: play the separate KōreroMai carrier, then the kupu.
+      // Māori: play a randomly chosen kōrero-mai carrier, then the kupu.
       const carrier = await playFirstAvailable([pickKoreroMai()], ear, level, false);
       carrier.el.addEventListener("ended", async () => {
         try {
@@ -3113,6 +3346,9 @@ function setLanguage(langKey, opts = {}) {
   // If switching away from a language that has training active, exit training.
   if (langKey !== "maori" && trainingActive()) exitTraining();
   state.language = langKey;
+  // Warm the CVC set now, so it's cached before the first word. Cheap if already
+  // done; no-op for te reo, which is warmed eagerly at startup.
+  if (langKey === "english") startEnglishPreloadIfNeeded();
   applyLanguageToUI();
   renderQueue();
   if (!opts.silent) saveSession();
