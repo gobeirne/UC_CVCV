@@ -572,19 +572,8 @@ menu {
 .queue-toolbar {
   display: flex;
   justify-content: flex-start;
-  gap: .4rem;
   margin: .35rem 0;
 }
-
-/* Clear queue is destructive but not the primary action, so it stays quiet
-   until hovered rather than sitting there in alarm red next to "+ Add list". */
-#clearQueueBtn { color: #7f1d1d; }
-#clearQueueBtn:hover:not(:disabled) {
-  background: #7f1d1d;
-  border-color: transparent;
-  color: #fff;
-}
-#clearQueueBtn[hidden] { display: none; }
 
 .small-add {
   padding: .4rem .75rem;
@@ -1112,3 +1101,10 @@ details summary {
   margin: 0;
   cursor: pointer;
 }
+
+/* Calibration dialog steps */
+.cal-steps { margin: .6rem 0; padding-left: 1.2rem; font-size: .88rem; line-height: 1.45; }
+.cal-steps li { margin-bottom: .35rem; }
+
+/* Transient presentation-level limit note on the test screen */
+.level-limit-msg { font-size: .85rem; color: #b45309; margin-left: .5rem; }

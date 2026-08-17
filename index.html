@@ -138,7 +138,6 @@
               </div>
               <div class="queue-toolbar">
                 <button id="addQueueBtn" type="button" class="small-add">+ Add list</button>
-                <button id="clearQueueBtn" type="button" class="small-add secondary" hidden>Clear queue</button>
               </div>
               <div id="queueChips" class="chips queue-chips"></div>
               <div class="actions">
@@ -194,7 +193,7 @@
 
             <div class="card">
               <h3>Calibration</h3>
-              <p class="hint" style="font-size:.85rem">Turn device volume fully up, play the calibration noise (<code>noise.mp3</code>), measure output in dB(A), then stop and enter the value. The noise is ILTASS-filtered and sits at the mean level of the 100 kupu, so the figure you enter is the speech reference level.</p>
+              <p class="hint" style="font-size:.85rem">Sets the level the app treats as full output. Choose your method and follow the steps.</p>
               <div class="actions wrap">
                 <button id="calibrateBtn" type="button">▶ Calibration noise</button>
                 <button id="testCalBtn" type="button" class="secondary" hidden>Test level</button>
@@ -343,6 +342,32 @@
       <menu>
         <button value="cancel" class="secondary">Cancel</button>
         <button id="trialEditSaveBtn" type="button">Save</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="calibrationDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>Calibration</h2>
+      <label>Method
+        <select id="calMethodSelect">
+          <option value="audiometer">Audiometer — via aux / tape input</option>
+          <option value="soundfield">Sound field — sound level meter</option>
+        </select>
+      </label>
+      <ol id="calSteps" class="cal-steps"></ol>
+      <div class="actions wrap">
+        <button id="calPlayBtn" type="button">▶ Play calibration noise</button>
+      </div>
+      <label>
+        <span id="calLevelLabelText">Audiometer dial setting, dB(A)</span>
+        <input id="calLevelInput" type="number" step="5" inputmode="decimal">
+      </label>
+      <p id="calLevelHint" class="hint"></p>
+      <p id="calDialogStatus" class="status"></p>
+      <menu>
+        <button value="cancel" class="secondary">Cancel</button>
+        <button id="calSaveBtn" type="button">Save calibration</button>
       </menu>
     </form>
   </dialog>
@@ -560,9 +585,6 @@
     }
   </style>
 
-  <!-- config.js first: it defines window.APP_CONFIG, which app.js reads on load.
-       If it is missing, app.js falls back to its built-in defaults. -->
-  <script src="config.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

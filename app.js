@@ -2,7 +2,6 @@
    Static, GitHub Pages friendly, local-file friendly.
    Put audio files in /sounds. The app resolves by the text before the first "_",
    trying the known filename first, then .mp3/.wav alternatives.
-   The current set is all .mp3, ILTASS-filtered and level-matched at source.
 */
 
 const MAORI_WORD_LISTS = {
@@ -183,103 +182,9 @@ function randomiseEnabled(langKey = state.language) {
   return !!(LANGUAGES[langKey] || LANGUAGES.maori).randomiseOrder;
 }
 
-/* ── Audio set ────────────────────────────────────────────────────
-   Every file in sounds/ is .mp3, ILTASS-filtered, and named for its
-   kupu with no calibration suffix — the whole set is level-matched at
-   source, so nothing here needs per-file gain correction.
-
-   Levels (see AUDIO_SPEC below):
-   · all 100 kupu share one momentary loudness (−22.5 LUFS);
-   · noise.mp3 sits at −25.85 dB(A) mean, which is the *average of the
-     momentary dB(A)* of those 100 kupu.
-   So measuring noise.mp3 on the meter measures the mean speech level
-   directly: the calibration figure the clinician types in is the
-   reference speech level, with no offset in between. */
-
-const KOREROMAI_FILES = [
-"kōrero_mai_01.mp3","kōrero_mai_02.mp3","kōrero_mai_03.mp3","kōrero_mai_04.mp3",
-"kōrero_mai_05.mp3","kōrero_mai_06.mp3","kōrero_mai_07.mp3","kōrero_mai_08.mp3",
-"kōrero_mai_09.mp3","kōrero_mai_10.mp3","kōrero_mai_11.mp3"
+const KNOWN_SOUND_FILES = [
+"hapū_+3.9dB.wav","hāte_-0.0dB.wav","hēki_+1.7dB.wav","heru_-1.3dB.wav","hine_-1.0dB.wav","hinu_-2.6dB.wav","hipi_+4.4dB.wav","honu_-2.5dB.wav","hope_+1.6dB.wav","huri_+0.6dB.wav","kaha_+3.2dB.wav","kare_-4.0dB.wav","keke_+1.5dB.wav","kēmu_-0.0dB.wav","kīngi_-2.1dB.wav","kino_-1.9dB.wav","koha_-2.2dB.wav","kohu_-2.7dB.wav","KōreroMai_01_+1.6dB.wav","KōreroMai_02_+2.2dB.wav","kupu_+1.7dB.wav","kurī_+0.2dB.wav","mangu_-2.2dB.wav","manu_-0.4dB.wav","mata_+1.1dB.wav","mihi_+1.9dB.wav","miro_-0.7dB.wav","mīti_+0.2dB.wav","mōku_+0.5dB.wav","moni_-1.1dB.wav","muku_-0.3dB.wav","mutu_-0.3dB.wav","nama_-0.2dB.wav","nāna_-2.1dB.wav","nēhi_-1.8dB.wav","neke_+4.0dB.wav","nēra_-1.1dB.wav","ngaki_+0.5dB.wav","ngako_+2.8dB.wav","ngaro_-3.9dB.wav","ngaru_-3.2dB.wav","ngata_+3.3dB.wav","ngāti_+2.0dB.wav","ngenge_-1.8dB.wav","ngeru_-1.8dB.wav","ngira_-2.8dB.wav","ngutu_+3.4dB.wav","niho_+2.1dB.wav","noho_+0.4dB.wav","noke_+1.6dB.wav","nōku_+2.3dB.wav","nōna_-1.7dB.wav","pahi_-0.9dB.wav","pāmu_-3.8dB.wav","papa_+2.5dB.wav","peka_-1.7dB.wav","pēpi_-1.4dB.wav","pere_-1.0dB.wav","piko_+0.6dB.wav","pipi_-1.5dB.wav","poto_+3.4dB.wav","pune_+0.5dB.wav","rama_-2.7dB.wav","rangi_+0.0dB.wav","rata_-4.2dB.wav","reka_-1.9dB.wav","rima_-2.3dB.wav","rimu_-1.9dB.wav","rōpū_+2.9dB.wav","roto_-0.3dB.wav","rūma_-1.6dB.wav","runga_+0.0dB.wav","take_+2.2dB.wav","tana_-2.7dB.wav","tāne_-1.7dB.wav","tangi_-1.1dB.wav","tapu_-0.8dB.wav","tēpu_+3.0dB.wav","tiki_+1.4dB.wav","tino_-2.0dB.wav","tiro_+4.9dB.wav","tuku_+4.8dB.wav","waha_+5.1dB.wav","wāhi_-6.1dB.wav","waho_-1.4dB.wav","waka_+0.4dB.wav","wehi_-0.3dB.wav","weka_-0.8dB.wav","wera_+0.4dB.wav","wētā_+0.9dB.wav","whana_-0.4dB.wav","whanga_-0.1dB.wav","whare_-3.2dB.wav","whata_-1.4dB.wav","whatu_+1.8dB.wav","whero_-2.5dB.wav","whetū_+2.2dB.wav","whiti_+3.0dB.wav","whitu_+3.9dB.wav","whiwhi_+4.4dB.wav","wiki_+0.0dB.wav","wiri_-1.7dB.wav"
 ];
-
-const CALIBRATION_NOISE_BASE = "noise";
-const CALIBRATION_NOISE_FILE = `${CALIBRATION_NOISE_BASE}.mp3`;
-
-/* ── Timing configuration ─────────────────────────────────────────
-   Defaults live here; config.js (loaded before this file) may override
-   any of them. If config.js is missing, malformed, or omits a key, the
-   default below is used — a broken config file must never stop a clinic
-   from running a test, so every value is validated and bad ones are
-   reported to the console and discarded rather than applied. */
-
-const DEFAULT_TIMING = {
-  carrierToKupuGapMs: 750,   // silence between carrier and kupu (Māori only)
-  kupuToResponseGapMs: 600,  // silence between kupu and training response
-  autoplayDelayMs: 250,      // let the trial paint before playback starts
-  maskerLeadInMs: 3100,      // masker alone before the first trial of a list
-  advanceDelayMs: 600        // fast-score correction window before advancing
-};
-
-// Upper bounds are sanity limits, not clinical ones: a stray keystroke that
-// turns 750 into 7500000 should be caught here rather than hanging a session.
-const TIMING_LIMITS = { min: 0, max: 30000 };
-
-const TIMING = (() => {
-  const cfg = (typeof window !== "undefined" && window.APP_CONFIG && window.APP_CONFIG.timing) || {};
-  const out = { ...DEFAULT_TIMING };
-  for (const [key, raw] of Object.entries(cfg)) {
-    if (!(key in DEFAULT_TIMING)) {
-      console.warn(`config.js: unknown timing key "${key}" ignored.`);
-      continue;
-    }
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < TIMING_LIMITS.min || n > TIMING_LIMITS.max) {
-      console.warn(
-        `config.js: timing.${key} = ${JSON.stringify(raw)} is not a number between ` +
-        `${TIMING_LIMITS.min} and ${TIMING_LIMITS.max} ms — using default ${DEFAULT_TIMING[key]}.`
-      );
-      continue;
-    }
-    out[key] = n;
-  }
-  return Object.freeze(out);
-})();
-
-const KUPU_SOUND_FILES = [
-"hapū.mp3","hāte.mp3","hēki.mp3","heru.mp3","hine.mp3","hinu.mp3","hipi.mp3","honu.mp3",
-"hope.mp3","huri.mp3","kaha.mp3","kare.mp3","keke.mp3","kēmu.mp3","kīngi.mp3","kino.mp3",
-"koha.mp3","kohu.mp3","kupu.mp3","kurī.mp3","mangu.mp3","manu.mp3","mata.mp3","mihi.mp3",
-"miro.mp3","mīti.mp3","mōku.mp3","moni.mp3","muku.mp3","mutu.mp3","nama.mp3","nāna.mp3",
-"nēhi.mp3","neke.mp3","nēra.mp3","ngaki.mp3","ngako.mp3","ngaro.mp3","ngaru.mp3","ngata.mp3",
-"ngāti.mp3","ngenge.mp3","ngeru.mp3","ngira.mp3","ngutu.mp3","niho.mp3","noho.mp3","noke.mp3",
-"nōku.mp3","nōna.mp3","pahi.mp3","pāmu.mp3","papa.mp3","peka.mp3","pēpi.mp3","pere.mp3",
-"piko.mp3","pipi.mp3","poto.mp3","pune.mp3","rama.mp3","rangi.mp3","rata.mp3","reka.mp3",
-"rima.mp3","rimu.mp3","rōpū.mp3","roto.mp3","rūma.mp3","runga.mp3","take.mp3","tana.mp3",
-"tāne.mp3","tangi.mp3","tapu.mp3","tēpu.mp3","tiki.mp3","tino.mp3","tiro.mp3","tuku.mp3",
-"waha.mp3","wāhi.mp3","waho.mp3","waka.mp3","wehi.mp3","weka.mp3","wera.mp3","wētā.mp3",
-"whana.mp3","whanga.mp3","whare.mp3","whata.mp3","whatu.mp3","whero.mp3","whetū.mp3","whiti.mp3",
-"whitu.mp3","whiwhi.mp3","wiki.mp3","wiri.mp3"
-];
-
-const KNOWN_SOUND_FILES = [...KUPU_SOUND_FILES, ...KOREROMAI_FILES, CALIBRATION_NOISE_FILE];
-
-/* Documented properties of the audio set. These are not knobs to twiddle —
-   they record what the files actually are, so the level maths below can be
-   read and checked against the recordings. */
-const AUDIO_SPEC = {
-  spectrum: "ILTASS",             // all files filtered to the long-term average speech spectrum
-  kupuMomentaryLufs: -22.5,       // identical for all 100 kupu
-  noiseMeanDbA: -25.85,           // mean dB(A) of noise.mp3
-  meanKupuMomentaryDbA: -25.85,   // mean of the 100 kupu momentary dB(A) values
-  kupuCount: 100,
-  carrierCount: 11
-};
-
-/* Difference between the calibration noise and the mean speech level, in dB.
-   Zero by construction for this set (the two figures above are equal). It
-   exists so that if the noise is ever re-rendered at a different level, this
-   is the single number to change. */
-const SPEECH_NOISE_OFFSET_DB = AUDIO_SPEC.meanKupuMomentaryDbA - AUDIO_SPEC.noiseMeanDbA;
 
 const PHONEMES = {
   C: ["p","t","k","m","n","ŋ","w","f","ɾ","h"],
@@ -290,7 +195,7 @@ const V_EQ = { "a":"a","aː":"a","e":"e","eː":"e","i":"i","iː":"i","o":"o","o�
 const state = {
   language: "maori",
   client: {},
-  calibration: { measuredDbA: null, timestamp: null, isCalibrated: false, sliderMinDb: -100, sliderMaxDb: 0, currentSliderDb: 0 },
+  calibration: { method: null, measuredDbA: null, timestamp: null, isCalibrated: false, sliderMinDb: -100, sliderMaxDb: 0, currentSliderDb: 0, strandedLists: 0 },
   queue: [],
   currentListIndex: -1,
   currentTrialIndex: 0,
@@ -318,12 +223,7 @@ const state = {
     calNode: null,
     testCalNode: null,
     activeStimuli: [],
-    decodedBuffers: {},
-    // Shuffle bag for the 11 KōreroMai carriers (see pickKoreroMai).
-    koreroBag: [],
-    lastKoreroMai: null,
-    // Timer ids for audio queued to start after a gap (see schedulePlayback).
-    pendingPlayback: []
+    decodedBuffers: {}
   }
 };
 
@@ -333,6 +233,204 @@ function snap5(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
   return Math.round(n / 5) * 5;
+}
+
+/* ── Calibration methods ─────────────────────────────────────────────────
+   Both methods yield the SAME quantity: the SPL produced at unity gain. What
+   differs is how it is obtained, what it costs to change, and therefore what
+   the app should say when a limit is reached.
+
+   audiometer  the figure is a DIAL SETTING. The ceiling is the clinician's to
+               move; the whole usable window slides with it.
+   soundfield  the figure is a METER READING with the device already at full
+               volume. The ceiling is a hardware fact — nothing raises it.
+
+   The method is NOT implied by the transducer: an audiometer can drive a
+   sound-field speaker. Do not infer it from $("transducer"). */
+const CAL_METHODS = {
+  audiometer: {
+    label: "Audiometer — via aux / tape input",
+    levelLabel: "Audiometer dial setting, dB(A)",
+    levelStep: 5,
+    steps: [
+      "Set the device volume to maximum and leave it there for the whole session.",
+      "Play the calibration noise and adjust the audiometer's aux input gain until its VU meter reads 0.",
+      "Set the audiometer dial to the highest level you expect to present, plus a margin. Use at least 6 dB of margin if you will be masking.",
+      "Stop the noise and enter that dial setting below."
+    ]
+  },
+  soundfield: {
+    label: "Sound field — sound level meter",
+    levelLabel: "Measured level, dB(A)",
+    levelStep: 0.1,
+    steps: [
+      "Set the device volume to maximum and leave it there for the whole session.",
+      "Place the sound level meter at the client's head position, facing the speaker.",
+      "Play the calibration noise and read the level in dB(A) using your usual meter settings.",
+      "Stop the noise and enter that reading below."
+    ]
+  }
+};
+
+function calMethod() { return state.calibration.method || "audiometer"; }
+function calMethodInfo() { return CAL_METHODS[calMethod()] || CAL_METHODS.audiometer; }
+function calMethodHint() {
+  return calMethod() === "audiometer"
+    ? `Levels are presented from this figure downward. Set the dial to the loudest ` +
+      `level you'll need, plus a little margin — at least 6 dB if you'll be masking.`
+    : `This is the most this setup can deliver with the device at full volume. The ` +
+      `calibration is valid only for this speaker, seat and room — recalibrate if any change.`;
+}
+// How to get more or less level, phrased in this method's terms. Used by every
+// limit message so the clinician is always told something they can act on.
+function moreLevelAdvice() {
+  return calMethod() === "audiometer"
+    ? "raise the audiometer dial and recalibrate"
+    : "this setup is already at full output — more level needs a different speaker or amplifier, or a closer position";
+}
+function lessLevelAdvice() {
+  return calMethod() === "audiometer"
+    ? "lower the audiometer dial and recalibrate"
+    : "this is the bottom of the recordings' range — there's nothing quieter to present";
+}
+
+/* ── Presentation level bounds ───────────────────────────────────────────
+   measuredDbA is the SPL at unity gain. The app only attenuates below it:
+     max = the reference itself (gain 1.0). Nothing above it plays without clipping.
+     min = the bottom of the recordings' dynamic range.
+   Neither bound is clinical — the clinician chooses the range by choosing the
+   reference. The software keeps the displayed level equal to the presented one
+   and never offers a negative dB(A). */
+
+// The recordings are 16-bit (as CD-based speech material has been for decades),
+// which carries ~96 dB of dynamic range. Attenuating further than this only digs
+// into quantisation noise, so 96 dB is where the useful range ends. This is a
+// property of the recordings, NOT a clinical or hardware limit — in practice the
+// floor almost never binds, because the reference sits well under 96 dB above the
+// levels anyone presents. Raise it only if the source material's bit depth does.
+const MAX_ATTENUATION_DB = 96;
+
+// dB(A) values below this aren't sound pressure levels. A physical sanity bound
+// that stops the floor going negative when the reference is under 96 dB(A);
+// it is not a clinical floor.
+const ABSOLUTE_FLOOR_DBA = 0;
+
+// Bounds for any dB(A) level the clinician can set. null when uncalibrated —
+// the dB FS path is a different quantity and is left alone.
+function levelBounds() {
+  const cal = state.calibration;
+  if (!cal.isCalibrated || cal.measuredDbA === null) return null;
+  const reference = Number(cal.measuredDbA);
+  // Levels live on a 5 dB grid: round the ceiling DOWN and the floor UP so
+  // every selectable position is genuinely inside the bounds.
+  const max = Math.floor(reference / 5) * 5;
+  const attenuationFloor = reference - MAX_ATTENUATION_DB;
+  const min = Math.ceil(Math.max(ABSOLUTE_FLOOR_DBA, attenuationFloor) / 5) * 5;
+  return {
+    reference, min, max,
+    usable: min <= max,
+    span: max - min,
+    floorIsAbsolute: attenuationFloor < ABSOLUTE_FLOOR_DBA
+  };
+}
+
+// Snap to the 5 dB grid, then hold inside the bounds.
+function clampLevel(value) {
+  const snapped = snap5(value);
+  const b = levelBounds();
+  if (!b || !b.usable) return snapped;   // uncalibrated: unity gain anyway
+  return Math.min(b.max, Math.max(b.min, snapped));
+}
+
+// Masker shares the reference with the stimulus — same gain path.
+function maskerLevel() { return clampLevel($("maskLevel") ? $("maskLevel").value : 0); }
+
+// Transient note in the test-screen nudge bar. Creates its own element.
+function flashLevelLimit(msg) {
+  let el = document.getElementById("levelLimitMsg");
+  if (!el) {
+    const bar = document.querySelector(".level-nudge-bar") ||
+                ($("levelNudgeLabel") && $("levelNudgeLabel").parentElement);
+    if (!bar) return;
+    el = document.createElement("span");
+    el.id = "levelLimitMsg";
+    el.className = "level-limit-msg";
+    el.setAttribute("role", "status");
+    bar.appendChild(el);
+  }
+  el.textContent = msg;
+  clearTimeout(flashLevelLimit._t);
+  flashLevelLimit._t = setTimeout(() => { el.textContent = ""; }, 6000);
+}
+
+// Worst-case combined clipping check: assumes the two signals add in phase.
+// Speech-plus-noise sums nearer sqrt(g1²+g2²), so this over-warns.
+function combinedClippingRisk() {
+  const cal = state.calibration;
+  if (!cal.isCalibrated || cal.measuredDbA === null) return null;
+  if (!$("maskEar") || $("maskEar").value === "off") return null;
+  const q = currentQueueItem();
+  if (!q) return null;
+  const g = L => Math.pow(10, (Number(L) - Number(cal.measuredDbA)) / 20);
+  const sum = g(q.levelDbA) + g(maskerLevel());
+  if (sum <= 1) return null;
+  return { sum, overshootDb: 20 * Math.log10(sum) };
+}
+
+// Single owner of the calibration status line, so range/method/stranded notes
+// don't overwrite each other.
+function renderCalStatus() {
+  const el = $("calStatus");
+  if (!el) return;
+  const b = levelBounds();
+  if (!b || !b.usable) return;   // uncalibrated / refused: message set elsewhere
+
+  const isAudiometer = calMethod() === "audiometer";
+  const parts = [
+    `${isAudiometer ? "Dial setting" : "Measured"} ${b.reference} dB(A) — presentation ` +
+    `range ${b.min}–${b.max} dB(A). Device volume must stay at maximum.`
+  ];
+  if (b.reference !== b.max) {
+    parts.push(`Ceiling rounded to ${b.max} to stay on the 5 dB grid.` +
+      (isAudiometer ? " Set the dial on a 5 dB step to avoid losing headroom." : ""));
+  }
+  parts.push(isAudiometer
+    ? `To present above ${b.max} dB(A), raise the audiometer dial and recalibrate.`
+    : `That is the most this setup can deliver — more level needs a different speaker ` +
+      `or amplifier, or a closer position.`);
+  if (b.floorIsAbsolute) {
+    // Reference is under 96 dB(A), so the recordings' range runs out before then:
+    // the floor simply sits at 0 dB(A) rather than reference − 96. Not a fault.
+    parts.push(`Range bottoms out at ${ABSOLUTE_FLOOR_DBA} dB(A).`);
+  }
+  if (state.calibration.strandedLists) {
+    parts.push(`${state.calibration.strandedLists} list(s) already tested outside ` +
+      `${b.min}–${b.max} dB(A); their recorded levels are unchanged — check the report ` +
+      `before relying on them.`);
+  }
+  el.textContent = parts.join(" ");
+}
+
+// A restored session or a new reference can leave queue levels outside the
+// current window. Re-clamp entries not yet started; leave levels that already
+// have results and warn, since rewriting them would desync queue from results.
+function reconcileQueueLevels() {
+  const b = levelBounds();
+  if (!b || !b.usable) { state.calibration.strandedLists = 0; return []; }
+  const stranded = [];
+  state.queue.forEach(q => {
+    const clamped = clampLevel(q.levelDbA);
+    if (clamped === q.levelDbA) return;
+    const hasResults = state.results.some(r =>
+      r.listNumber === q.listNumber &&
+      r.listLevelDbA === q.levelDbA &&
+      (r.language || "maori") === (q.language || "maori"));
+    if (hasResults || q.status === "in-progress") stranded.push({ ...q });
+    else q.levelDbA = clamped;
+  });
+  renderQueue();
+  state.calibration.strandedLists = stranded.length;
+  return stranded;
 }
 
 function conditionSymbol(condition) {
@@ -627,7 +725,7 @@ function schedulePendingAdvance() {
   state._pendingAdvance = setTimeout(() => {
     state._pendingAdvance = null;
     nextTrial();
-  }, TIMING.advanceDelayMs);
+  }, 600);
 }
 
 function cancelPendingAdvance() {
@@ -964,10 +1062,11 @@ async function playKupuOnly() {
 async function playClientResponse() {
   const trial = currentTrial();
   if (!trainingActive() || !trial || !trial.trainingFile) return;
-  // Play the response binaurally at a clear, comfortable level:
-  // 65 dB(A) when calibrated, otherwise as recorded (unity gain).
+  // Play the response binaurally at a clear, comfortable level: aim for
+  // 65 dB(A) when calibrated, but hold it inside the presentation range so a
+  // high dial setting doesn't push it below the usable floor. Unity when not.
   const level = state.calibration.isCalibrated
-    ? Math.min(65, state.calibration.measuredDbA)
+    ? clampLevel(65)
     : 0;
   try {
     const node = await playFirstAvailable([`${TRAINING_DIR}/${trial.trainingFile}`], "binaural", level, false);
@@ -1059,17 +1158,23 @@ function handleTrainingNext() {
     trial.trainingAttempts = (trial.trainingAttempts || 0) + 1;
 
     // Per-position: where did the TRAINEE disagree with the truth?
+    // Only meaningful when they made per-position judgements. fastScore()
+    // blanks targetSelections/responseSelections, so reading them here would
+    // report "you marked this incorrect" for every position the client got
+    // RIGHT and stay silent about the one they got wrong.
     const traineeMismatches = [];
-    positions.forEach((pos, i) => {
-      const transcribed = state.responseSelections[i];
-      const judgedCorrect =
-        (transcribed !== null && transcribed !== undefined && transcribed !== "")
-          ? equivalentForScoring(targets[i], transcribed)
-          : !!state.targetSelections[i];
-      if (judgedCorrect !== pos.correct) {
-        traineeMismatches.push({ pos, i, transcribed, judgedCorrect });
-      }
-    });
+    if (state.scoringMode !== "fast") {
+      positions.forEach((pos, i) => {
+        const transcribed = state.responseSelections[i];
+        const judgedCorrect =
+          (transcribed !== null && transcribed !== undefined && transcribed !== "")
+            ? equivalentForScoring(targets[i], transcribed)
+            : !!state.targetSelections[i];
+        if (judgedCorrect !== pos.correct) {
+          traineeMismatches.push({ pos, i, transcribed, judgedCorrect });
+        }
+      });
+    }
 
     let body;
     if (traineeScore === trueScore) {
@@ -1081,8 +1186,13 @@ function handleTrainingNext() {
     }
 
     if (trial.trainingAttempts >= 2) {
-      // Full reveal: show every position
+      // Full reveal: show every position (truth-only, safe in any scoring mode)
       body += positions.map(describePosition).join("");
+    } else if (state.scoringMode === "fast") {
+      // No per-position judgements to compare against — don't invent any.
+      body += `<p class="tf-hint">You scored this as a total, so there's nothing ` +
+              `to compare position by position. Listen again — and if you're not ` +
+              `sure which sound was missed, mark each phoneme individually.</p>`;
     } else {
       // First miss: point at the positions the trainee actually got wrong…
       traineeMismatches.forEach(({ pos, i, transcribed, judgedCorrect }) => {
@@ -1126,6 +1236,11 @@ function showTrainingFeedback(title, bodyHtml, opts = {}) {
   if (!dlg) return;
   $("tfTitle").textContent = title;
   $("tfBody").innerHTML = bodyHtml;
+  // Record which variant played, so a student's bug report can be traced to a
+  // recording (ensureTrialTrainingVariant picks among a word's files at random).
+  const trial = currentTrial();
+  if (trial && trial.trainingFile) $("tfBody").dataset.file = trial.trainingFile;
+  else delete $("tfBody").dataset.file;
   $("tfPlayKupuBtn").hidden = !opts.listen;
   $("tfPlayResponseBtn").hidden = !opts.listen;
   $("tfContinueBtn").hidden = !opts.continue;
@@ -1171,7 +1286,18 @@ function bindEvents() {
   };
 
   // Calibration
-  $("calibrateBtn").onclick = toggleCalibration;
+  $("calibrateBtn").onclick = openCalibrationDialog;
+  if ($("calMethodSelect")) $("calMethodSelect").onchange = renderCalMethodUI;
+  if ($("calPlayBtn")) $("calPlayBtn").onclick = toggleCalibrationNoise;
+  if ($("calSaveBtn")) $("calSaveBtn").onclick = saveCalibrationDialog;
+  // Catches Cancel, Esc and Save alike — the noise must never outlive the dialog.
+  if ($("calibrationDialog")) $("calibrationDialog").addEventListener("close", () => {
+    stopCalibrationSound();
+    if ($("calPlayBtn")) {
+      $("calPlayBtn").textContent = "▶ Play calibration noise";
+      $("calPlayBtn").classList.remove("active");
+    }
+  });
   $("testCalBtn").onclick = testCalibratedSound;
   $("outputLevel").addEventListener("input", updateOutputLevelFromSlider);
   $("outputLevel").addEventListener("change", updateOutputLevelFromSlider);
@@ -1208,7 +1334,7 @@ function bindEvents() {
   };
 
   $("maskLevel").addEventListener("input", () => {
-    $("maskLevel").value = snap5($("maskLevel").value);
+    $("maskLevel").value = clampLevel($("maskLevel").value);
     $("maskLevelLive").value = $("maskLevel").value;
     updateLiveMasker();
   });
@@ -1217,7 +1343,7 @@ function bindEvents() {
     updateLiveMasker();
   });
   $("maskLevelLive").addEventListener("input", () => {
-    $("maskLevelLive").value = snap5($("maskLevelLive").value);
+    $("maskLevelLive").value = clampLevel($("maskLevelLive").value);
     $("maskLevel").value = $("maskLevelLive").value;
     updateLiveMasker();
   });
@@ -1227,13 +1353,12 @@ function bindEvents() {
   });
 
   // Queue
-  $("addListBtn").onclick = () => addList(Number($("listChoice").value), snap5($("listLevel").value));
-  $("addRandomBtn").onclick = () => addRandomList(snap5($("listLevel").value));
+  $("addListBtn").onclick = () => addList(Number($("listChoice").value), clampLevel($("listLevel").value));
+  $("addRandomBtn").onclick = () => addRandomList(clampLevel($("listLevel").value));
   $("addNRandomBtn").onclick = addNRandomLists;
   $("startBtn").onclick = startTesting;
 
   if ($("addQueueBtn")) $("addQueueBtn").onclick = () => openQueueDialog(null);
-  if ($("clearQueueBtn")) $("clearQueueBtn").onclick = clearQueue;
   if ($("queueSaveBtn")) $("queueSaveBtn").onclick = saveQueueDialog;
   if ($("queueDeleteBtn")) $("queueDeleteBtn").onclick = deleteQueueDialog;
   if ($("presentationCondition")) $("presentationCondition").onchange = updatePresentationConditionRouting;
@@ -1291,7 +1416,7 @@ function bindEvents() {
     const tag = document.activeElement.tagName;
     const inInput = ["INPUT","TEXTAREA","SELECT"].includes(tag);
 
-    // 0–N: fast score + auto-advance (TIMING.advanceDelayMs window for nav click interception)
+    // 0–N: fast score + auto-advance (600ms window for nav click interception)
     if (/^[0-9]$/.test(e.key) && Number(e.key) <= phonemeCount() && !inInput) {
       e.preventDefault();
       fastScore(Number(e.key));
@@ -1355,37 +1480,25 @@ function ensureAudio() {
   return state.audio.ctx;
 }
 
-// Macrons can be stored either pre-composed (ā = U+0101, NFC) or as a vowel
-// plus a combining macron (NFD). The word lists are NFC; a filesystem or
-// upload path may hand back either. Compare and build URLs in NFC, and keep
-// NFD as a fallback candidate so a differently-encoded upload still resolves.
-function nfc(s) { return typeof s === "string" ? s.normalize("NFC") : s; }
-function nfd(s) { return typeof s === "string" ? s.normalize("NFD") : s; }
-
 function soundKey(filename) {
-  // Strip path and extension. The trailing "_+1.7dB" strip is kept only for
-  // legacy recordings — current files carry no calibration suffix — and is
-  // safe for names like kōrero_mai_01.mp3, whose underscores are meaningful.
-  return nfc(filename)
+  // Strip path, extension, and final calibration suffix only.
+  // This preserves meaningful underscores in names like KōreroMai_01_+1.6dB.wav.
+  return filename
     .replace(/^.*\//, "")
     .replace(/\.(mp3|wav)$/i, "")
     .replace(/_[+-]?\d+(?:\.\d+)?dB$/i, "");
 }
 
 function fileForWord(word) {
-  const exact = KNOWN_SOUND_FILES.find(f => soundKey(f) === nfc(word));
+  const exact = KNOWN_SOUND_FILES.find(f => soundKey(f) === word);
   if (exact) return `sounds/${exact}`;
-  return `sounds/${nfc(word)}.mp3`;
+  return `sounds/${word}.mp3`;
 }
 
 function candidatesForBase(base) {
-  // Māori bases are the word/known stem. Known filenames first, then .mp3
-  // (the whole current set is mp3, so try it before the legacy .wav), then
-  // the NFD spelling as a last resort.
-  const key = nfc(base);
-  const known = KNOWN_SOUND_FILES.filter(f => soundKey(f) === key).map(f => `sounds/${f}`);
-  const fallbacks = [`sounds/${key}.mp3`, `sounds/${key}.wav`, `sounds/${nfd(base)}.mp3`];
-  return [...new Set([...known, ...fallbacks])];
+  // Māori bases are the word/known stem; match known files, then .wav/.mp3.
+  const known = KNOWN_SOUND_FILES.filter(f => soundKey(f) === base).map(f => `sounds/${f}`);
+  return [...known, `sounds/${base}.wav`, `sounds/${base}.mp3`];
 }
 
 // English stems are NNNN_Word (e.g. "0301_Pies"). The recordings are all .mp3,
@@ -1407,31 +1520,8 @@ function englishCandidates(stem) {
   return stems.map(s => `${ENGLISH_SOUND_DIR}/${s}.mp3`);
 }
 
-// Randomise the carrier across all 11 recordings. A plain Math.random() pick
-// clusters — with 11 files you would hear the same carrier twice in a row
-// roughly once every 11 trials, which a listener notices. Instead we draw
-// without replacement from a shuffled bag and reshuffle when it empties,
-// rejecting a reshuffle that would repeat the carrier across the seam. Over a
-// 10-kupu list that gives an even spread with no back-to-back repeats.
 function pickKoreroMai() {
-  const bag = state.audio.koreroBag;
-  if (!bag.length) {
-    const keys = KOREROMAI_FILES.map(soundKey);
-    do { shuffleInPlace(keys); }
-    while (keys.length > 1 && keys[keys.length - 1] === state.audio.lastKoreroMai);
-    state.audio.koreroBag = keys;
-  }
-  const pick = state.audio.koreroBag.pop();
-  state.audio.lastKoreroMai = pick;
-  return pick;
-}
-
-function shuffleInPlace(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
+  return Math.random() < .5 ? "KōreroMai_01" : "KōreroMai_02";
 }
 
 // Route an input node to the left ear, right ear, or both, without the
@@ -1535,17 +1625,24 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
 
 function gainForLevel(levelDbA) {
   if (state.calibration.isCalibrated && state.calibration.measuredDbA !== null) {
-    // measuredDbA is the meter reading for noise.mp3 at unity gain. Because the
-    // noise and the mean kupu sit at the same dB(A) (SPEECH_NOISE_OFFSET_DB is
-    // 0 for this set), that reading is also the unity-gain speech level, so the
-    // attenuation needed to land on the requested level is a plain subtraction.
-    const unityGainSpeechDbA = Number(state.calibration.measuredDbA) + SPEECH_NOISE_OFFSET_DB;
-    const attenuation = unityGainSpeechDbA - Number(levelDbA);
-    return Math.pow(10, -attenuation / 20);
+    const attenuation = Number(state.calibration.measuredDbA) - Number(levelDbA);
+    const gain = Math.pow(10, -attenuation / 20);
+    if (gain > 1) {
+      // The reference IS unity gain. Amplifying past it clips the sample and
+      // the on-screen dB(A) stops describing what the client hears. Cap, and
+      // complain — if this fires, a level reached the audio path without
+      // passing clampLevel().
+      console.error(
+        `gainForLevel: ${levelDbA} dB(A) is above the calibration reference of ` +
+        `${state.calibration.measuredDbA} dB(A). Capped at unity — presented level ` +
+        `is NOT the displayed level. To present higher, ${moreLevelAdvice()}.`
+      );
+      return 1;
+    }
+    return gain;
   }
-  // Uncalibrated: every kupu shares one momentary loudness (−22.5 LUFS) and the
-  // noise is matched to their mean, so the whole set is already level-normalised
-  // relative to itself. Play at unity and let device volume set the output.
+  // Uncalibrated: all files are already level-normalised relative to each other,
+  // so play everything at unity gain and let device volume control the output.
   return 1.0;
 }
 
@@ -1555,7 +1652,7 @@ async function playFirstAvailable(bases, ear, levelDbA, loop=false) {
     const urls = base.includes("/") ? [base] : candidatesForBase(base);
     for (const url of urls) {
       // Confirm the file actually exists before trying to play it. Probing with
-      // fetch makes the extension fallback reliable (a missing extension is a
+      // fetch makes the .wav→.mp3 fallback reliable (a missing extension is a
       // clean 404 here, not an unreliable HTMLAudioElement play() rejection)
       // and surfaces real case-sensitivity mismatches instead of masking them.
       let exists = true;
@@ -1587,10 +1684,26 @@ async function playFirstAvailable(bases, ear, levelDbA, loop=false) {
 
 function setupCalibrationSlider() {
   const slider = $("outputLevel");
-  slider.min = state.calibration.sliderMinDb ?? -100;
-  slider.max = state.calibration.sliderMaxDb ?? 0;
-  slider.step = 0.1;
-  slider.value = state.calibration.currentSliderDb ?? slider.max;
+  // Recompute from measuredDbA rather than reading persisted bounds: a session
+  // saved under the old rule carries stale (possibly negative) ones, and would
+  // restore them even after this fix lands.
+  const b = levelBounds();
+  if (b && b.usable) {
+    state.calibration.sliderMinDb = b.min;
+    state.calibration.sliderMaxDb = b.max;
+    state.calibration.currentSliderDb = clampLevel(state.calibration.currentSliderDb ?? b.max);
+    slider.step = 5;
+  } else {
+    // Uncalibrated: dB FS, −100…0, unity at 0. Honest about what it is.
+    state.calibration.sliderMinDb = -100;
+    state.calibration.sliderMaxDb = 0;
+    state.calibration.currentSliderDb =
+      Math.min(0, Math.max(-100, snap5(state.calibration.currentSliderDb ?? 0)));
+    slider.step = 5;
+  }
+  slider.min = state.calibration.sliderMinDb;
+  slider.max = state.calibration.sliderMaxDb;
+  slider.value = state.calibration.currentSliderDb;
   updateOutputLevelFromSlider();
 }
 
@@ -1617,21 +1730,55 @@ function updateOutputLevelFromSlider() {
   saveSession();
 }
 
-function applyCalibrationLevel(level, timestamp = new Date().toISOString()) {
-  state.calibration.measuredDbA = level;
+function applyCalibrationLevel(level, timestamp = new Date().toISOString(), method) {
+  const reference = Number(level);
+  if (!Number.isFinite(reference)) return false;
+
+  state.calibration.method = method || calMethod();
+  state.calibration.measuredDbA = reference;
   state.calibration.timestamp = timestamp;
   state.calibration.isCalibrated = true;
-  state.calibration.sliderMaxDb = level;
-  state.calibration.sliderMinDb = Math.floor(level / 5) * 5 - 60;
-  state.calibration.currentSliderDb = level;
+
+  const b = levelBounds();
+
+  if (!b.usable) {
+    // Only reachable when the reference is below the physical floor, i.e. the
+    // figure entered is not a sound pressure level. Refuse rather than hand
+    // back a slider that looks functional.
+    const wasMethod = state.calibration.method;
+    state.calibration.isCalibrated = false;
+    state.calibration.measuredDbA = null;
+    state.calibration.sliderMinDb = -100;
+    state.calibration.sliderMaxDb = 0;
+    state.calibration.currentSliderDb = 0;
+    state.calibration.method = wasMethod;   // keep for the dialog
+    setupCalibrationSlider();
+    if ($("calStatus")) $("calStatus").textContent =
+      `${reference} dB(A) is not a usable reference. Check the figure is ` +
+      (wasMethod === "audiometer"
+        ? "the audiometer dial setting"
+        : "the meter reading at the client's position") +
+      ` in dB(A). Staying in uncalibrated mode.`;
+    saveSession();
+    return false;
+  }
+
+  state.calibration.sliderMinDb = b.min;
+  state.calibration.sliderMaxDb = b.max;
+  state.calibration.currentSliderDb = b.max;
+
   const slider = $("outputLevel");
-  slider.min = state.calibration.sliderMinDb;
-  slider.max = state.calibration.sliderMaxDb;
-  slider.step = 0.1;
-  slider.value = level;
+  slider.min = b.min;
+  slider.max = b.max;
+  slider.step = 5;   // both ends on the grid; make travel match the snap
+  slider.value = b.max;
+
   $("testCalBtn").hidden = false;
   updateOutputLevelFromSlider();
+  reconcileQueueLevels();
+  renderCalStatus();
   saveSession();
+  return true;
 }
 
 function offerStoredCalibration() {
@@ -1640,11 +1787,19 @@ function offerStoredCalibration() {
   try {
     const data = JSON.parse(saved);
     if (!data.level) return;
-    applyCalibrationLevel(Number(data.level), data.timestamp);
+    // data.method may be absent on calibrations saved before methods existed;
+    // calMethod() falls back to "audiometer".
+    const ok = applyCalibrationLevel(Number(data.level), data.timestamp, data.method);
+    if (!ok) return;
     const when = data.timestamp
       ? new Date(data.timestamp).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "short" })
       : "earlier";
-    if ($("calStatus")) $("calStatus").textContent = `Calibration restored: ${data.level} dB(A) from ${when}. Device volume must be at maximum.`;
+    // renderCalStatus() has set the live range line; prepend the restore notice
+    // rather than overwrite it. The stored figure is someone else's dial setting
+    // or an assumption the room is unchanged — flag it as needing confirmation.
+    if ($("calStatus")) $("calStatus").textContent =
+      `Calibration restored from ${when} — confirm it still holds (re-run calibration if ` +
+      `the dial, speaker, seat or room has changed). ` + $("calStatus").textContent;
   } catch {}
 }
 
@@ -1674,41 +1829,89 @@ function stopCalibrationSound() {
   }
 }
 
-async function toggleCalibration() {
-  const btn = $("calibrateBtn");
+function openCalibrationDialog() {
+  const dlg = $("calibrationDialog");
+  if (!dlg) return;
+  $("calMethodSelect").value = calMethod();
+  $("calLevelInput").value = state.calibration.measuredDbA ?? "";
+  $("calDialogStatus").textContent = "";
+  renderCalMethodUI();
+  dlg.showModal();
+}
+
+function renderCalMethodUI() {
+  const info = CAL_METHODS[$("calMethodSelect").value] || CAL_METHODS.audiometer;
+  const ol = $("calSteps");
+  ol.innerHTML = "";
+  info.steps.forEach(s => {
+    const li = document.createElement("li");
+    li.textContent = s;
+    ol.appendChild(li);
+  });
+  $("calLevelLabelText").textContent = info.levelLabel;
+  $("calLevelInput").step = info.levelStep;
+  // hint depends on the selected method, not the stored one
+  const sel = $("calMethodSelect").value;
+  $("calLevelHint").textContent = sel === "audiometer"
+    ? `Levels are presented from this figure downward. Set the dial to the loudest ` +
+      `level you'll need, plus a little margin — at least 6 dB if you'll be masking.`
+    : `This is the most this setup can deliver with the device at full volume. The ` +
+      `calibration is valid only for this speaker, seat and room — recalibrate if any change.`;
+}
+
+async function toggleCalibrationNoise() {
+  const btn = $("calPlayBtn");
   if (state.audio.calNode) {
     stopCalibrationSound();
-    btn.textContent = "Calibration";
+    btn.textContent = "▶ Play calibration noise";
     btn.classList.remove("active");
-    const measured = prompt("Enter measured calibration level (in dB A):");
-    if (!measured || isNaN(measured)) return;
-    const level = parseFloat(measured);
-    applyCalibrationLevel(level);
-    localStorage.setItem("ucTeReoSpeechAudiometryCalibration", JSON.stringify({ level, timestamp: state.calibration.timestamp }));
-    $("calStatus").textContent = `Calibrated to ${level} dB A.`;
+    $("calDialogStatus").textContent = "";
     return;
   }
 
   stopCurrentStimulusIfAny();
   stopTestCalibratedSound();
   ensureAudio();
+
   let buffer;
   try {
-    buffer = await decodeFirstAvailable([CALIBRATION_NOISE_BASE, "calib", "masking"]);
+    buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
   } catch {
-    alert("No calibration sound file found.\nPlease add noise.mp3 to the sounds/ folder.");
+    $("calDialogStatus").textContent =
+      "No calibration sound found. Add calib.wav to the sounds/ folder.";
     return;
   }
-  alert("Turn your device volume all the way up, then tap OK to play the calibration noise.\n\nnoise.mp3 is ILTASS-filtered and sits at the mean level of the 100 kupu, so the dB(A) you measure is the speech reference level.");
+
   const source = state.audio.ctx.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
-  source.connect(state.audio.ctx.destination);
+  source.connect(state.audio.ctx.destination);   // unity gain: this IS the reference
   source.start();
   state.audio.calNode = source;
-  btn.textContent = "Stop & Enter Level";
+
+  btn.textContent = "■ Stop calibration noise";
   btn.classList.add("active");
-  $("calStatus").textContent = "Calibration sound playing.";
+  $("calDialogStatus").textContent = "Calibration noise playing at full output.";
+}
+
+function saveCalibrationDialog() {
+  const method = $("calMethodSelect").value;
+  const raw = $("calLevelInput").value;
+  const level = Number(raw);
+  if (raw === "" || !Number.isFinite(level)) {
+    $("calDialogStatus").textContent = "Enter the level before saving.";
+    return;
+  }
+  const ok = applyCalibrationLevel(level, new Date().toISOString(), method);
+  if (!ok) {
+    // Refused — mirror the reason into the dialog and stay open so the figure
+    // can be corrected without redoing the noise.
+    $("calDialogStatus").textContent = $("calStatus").textContent;
+    return;
+  }
+  localStorage.setItem("ucTeReoSpeechAudiometryCalibration",
+    JSON.stringify({ level, method, timestamp: state.calibration.timestamp }));
+  $("calibrationDialog").close();
 }
 
 async function testCalibratedSound() {
@@ -1724,7 +1927,7 @@ async function testCalibratedSound() {
 
   let buffer;
   try {
-    buffer = await decodeFirstAvailable([CALIBRATION_NOISE_BASE, "calib", "masking"]);
+    buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
   } catch {
     alert("No calibration sound file found.");
     return;
@@ -1756,25 +1959,7 @@ function stopTestCalibratedSound() {
   if ($("testCalBtn")) $("testCalBtn").textContent = "Test Calibrated Sound";
 }
 
-// Timers that will start audio later (the carrier→kupu gap, the kupu→response
-// gap). Tracked so stopping playback also cancels anything still queued —
-// otherwise a 750 ms gap leaves a window in which a cancelled kupu still fires.
-function schedulePlayback(fn, delayMs) {
-  const id = setTimeout(() => {
-    state.audio.pendingPlayback = state.audio.pendingPlayback.filter(t => t !== id);
-    fn();
-  }, delayMs);
-  state.audio.pendingPlayback.push(id);
-  return id;
-}
-
-function cancelPendingPlayback() {
-  for (const id of state.audio.pendingPlayback || []) clearTimeout(id);
-  state.audio.pendingPlayback = [];
-}
-
 function stopCurrentStimulusIfAny() {
-  cancelPendingPlayback();
   for (const node of state.audio.activeStimuli || []) {
     try {
       node.el.pause();
@@ -1865,8 +2050,10 @@ function updatePresentationConditionRouting() {
 }
 
 function addList(listNumber, level) {
-  if (!listNumber || !level) return;
-  state.queue.push({ listNumber, levelDbA: level, language: state.language, status: "queued", id: crypto.randomUUID?.() || String(Date.now()+Math.random()) });
+  const lvl = clampLevel(level);
+  // WAS: if (!listNumber || !level) return; — rejected a legitimate level of 0
+  if (!listNumber || !Number.isFinite(lvl)) return;
+  state.queue.push({ listNumber, levelDbA: lvl, language: state.language, status: "queued", id: crypto.randomUUID?.() || String(Date.now()+Math.random()) });
   renderQueue();
   saveSession();
 }
@@ -1890,7 +2077,7 @@ function addRandomList(level) {
 
 function addNRandomLists() {
   const n = Math.max(1, Math.min(10, Number($("randomCount").value)));
-  const level = snap5($("randomLevel").value);
+  const level = clampLevel($("randomLevel").value);
   for (let i = 0; i < n; i++) addRandomList(level);
 }
 
@@ -1921,11 +2108,6 @@ function renderQueue() {
     box.appendChild(chip);
   });
 
-  // Nothing to clear when the queue is empty — hide the button rather than
-  // offering an action that would do nothing.
-  const clearBtn = $("clearQueueBtn");
-  if (clearBtn) clearBtn.hidden = state.queue.length === 0;
-
   const progress = $("progressIndicator");
   if (progress) progress.innerHTML = box.innerHTML;
 }
@@ -1945,7 +2127,7 @@ function openQueueDialog(index) {
 function saveQueueDialog() {
   const idxRaw = $("queueEditIndex").value;
   const listNumber = Number($("queueListNumber").value);
-  const levelDbA = snap5($("queueLevel").value);
+  const levelDbA = clampLevel($("queueLevel").value);
   if (idxRaw === "") {
     addList(listNumber, levelDbA);
   } else {
@@ -1969,38 +2151,6 @@ function deleteQueueDialog() {
   renderQueue();
   saveSession();
   $("queueDialog").close();
-}
-
-// Empty the queue. This removes *plans*, not *data*: results already scored
-// live in state.results and stay in the report and the CSV, so a clinician who
-// clears a queue mid-session does not lose what the client actually did. The
-// confirmation says so explicitly, because "clear" reads as "delete everything"
-// and someone hesitating over that button needs to know it isn't.
-function clearQueue() {
-  if (!state.queue.length) return;
-
-  const started = state.queue.filter(q => q.status !== "queued").length;
-  const withResults = state.queue.filter(q =>
-    state.results.some(r =>
-      r.listNumber === q.listNumber &&
-      r.listLevelDbA === q.levelDbA &&
-      (r.language || "maori") === (q.language || "maori")
-    )
-  ).length;
-
-  let message = `Remove all ${state.queue.length} queued list${state.queue.length === 1 ? "" : "s"}?`;
-  if (started || withResults) {
-    const n = Math.max(started, withResults);
-    message += `\n\n${n} of them ${n === 1 ? "has" : "have"} already been tested. `
-             + `Scores already recorded are kept — they stay in the report and the CSV. `
-             + `Only the queue itself is cleared.`;
-  }
-  if (!confirm(message)) return;
-
-  state.queue = [];
-  state.currentListIndex = -1;
-  renderQueue();
-  saveSession();
 }
 
 function moveQueueItem(from, to) {
@@ -2089,11 +2239,10 @@ function renderTrial() {
 
 function scheduleAutoplay() {
   // Let the UI paint first, then play the carrier phrase + kupu.
-  // For the first kupu in a list, if masking is active, run the masker alone first
-  // (TIMING.maskerLeadInMs). All delays here are set in config.js.
+  // For the first kupu in a list, if masking is active, give the masker at least 3 seconds first.
   const maskerOn = $("maskEar").value !== "off";
   const needsMaskerLeadIn = maskerOn && !state.firstTrialMaskerPrimed && state.currentTrialIndex === 0;
-  const delay = needsMaskerLeadIn ? TIMING.maskerLeadInMs : TIMING.autoplayDelayMs;
+  const delay = needsMaskerLeadIn ? 3100 : 250;
   if (needsMaskerLeadIn) state.firstTrialMaskerPrimed = true;
 
   setTimeout(() => {
@@ -2140,7 +2289,7 @@ function renderTrialNavigator() {
             stimulusEar: $("stimEar").value,
             transducer: $("transducer") ? $("transducer").value : "",
             maskerEar: $("maskEar").value,
-            maskerLevelDbA: Number($("maskLevel").value),
+            maskerLevelDbA: maskerLevel(),
             trialOrder: curTrial.order,
             presentedWord: curTrial.word[0],
             targetPhonemes: targets,
@@ -2150,7 +2299,7 @@ function renderTrialNavigator() {
             selectedTargetCorrectness: state.scoringMode === "fast" ? blankSelections() : [...state.targetSelections],
             score,
             percent: Math.round((score / targets.length) * 100),
-            maskerLevelReport: $("maskEar").value === "off" ? "none" : Number($("maskLevel").value),
+            maskerLevelReport: $("maskEar").value === "off" ? "none" : maskerLevel(),
             comment: $("trialComment").value.trim()
           };
           const existingIdx = state.currentResultIndexByTrial[state.currentTrialIndex];
@@ -2436,30 +2585,21 @@ async function playCurrent(withCarrier) {
   const chainResponse = (kupuNode) => {
     if (!trainingActive() || !trial.trainingFile) return;
     kupuNode.el.addEventListener("ended", () => {
-      schedulePlayback(() => {
+      setTimeout(() => {
         if ($("screen-test").classList.contains("active")) playClientResponse();
-      }, TIMING.kupuToResponseGapMs);
+      }, 600);
     }, { once: true });
   };
 
   try {
     if (withCarrier && L.hasCarrier) {
-      // Māori: play the separate KōreroMai carrier, wait the configured gap,
-      // then play the kupu. The gap is a real pause the clinician can hear, so
-      // it has to be cancellable — if they hit replay, change level, or move to
-      // another trial while it is running, stopCurrentStimulusIfAny() clears the
-      // pending timer and no stray kupu fires afterwards.
+      // Māori: play the separate KōreroMai carrier, then the kupu.
       const carrier = await playFirstAvailable([pickKoreroMai()], ear, level, false);
-      carrier.el.addEventListener("ended", () => {
-        schedulePlayback(async () => {
-          if (!$("screen-test").classList.contains("active")) return;
-          // The trial may have moved on during the gap; don't play a stale kupu.
-          if (currentTrial() !== trial) return;
-          try {
-            const kupu = await playFirstAvailable(stimBases, ear, level, false);
-            chainResponse(kupu);
-          } catch {}
-        }, TIMING.carrierToKupuGapMs);
+      carrier.el.addEventListener("ended", async () => {
+        try {
+          const kupu = await playFirstAvailable(stimBases, ear, level, false);
+          chainResponse(kupu);
+        } catch {}
       }, { once: true });
     } else {
       // English: carrier is embedded in the file — just play the file.
@@ -2472,32 +2612,12 @@ async function playCurrent(withCarrier) {
   }
 }
 
-// Speech-to-noise ratio for the current trial, in dB, or null if not maskable.
-// Valid as a plain subtraction only because noise.mp3 is matched to the mean
-// kupu level (SPEECH_NOISE_OFFSET_DB === 0): both dial settings mean the same
-// thing on the meter, so their difference is the SNR.
-function currentSnrDb() {
-  if (!$("maskEar") || $("maskEar").value === "off") return null;
-  const q = currentQueueItem();
-  if (!q) return null;
-  const masker = Number($("maskLevel").value);
-  if (!Number.isFinite(masker)) return null;
-  return Number(q.levelDbA) - masker + SPEECH_NOISE_OFFSET_DB;
-}
-
-function formatSnr(snr) {
-  return `${snr > 0 ? "+" : ""}${Math.round(snr * 10) / 10} dB SNR`;
-}
-
 function setMaskerIndicator(isOn) {
   const el = $("maskerStatus");
   if (!el) return;
   el.classList.toggle("on", !!isOn);
   el.classList.toggle("off", !isOn);
-  const snr = isOn ? currentSnrDb() : null;
-  el.textContent = isOn
-    ? (snr === null ? "Masker playing" : `Masker playing — ${formatSnr(snr)}`)
-    : "Masker off";
+  el.textContent = isOn ? "Masker playing" : "Masker off";
 }
 
 function setStimulusIndicator(isOn, label) {
@@ -2516,7 +2636,7 @@ function syncMaskerControls() {
 function updateLiveMasker() {
   syncMaskerControls();
   if (state.audio.masker) {
-    state.audio.masker.gain.gain.value = gainForLevel(Number($("maskLevel").value));
+    state.audio.masker.gain.gain.value = gainForLevel(maskerLevel());
     state.audio.masker.pan.pan.value = $("maskEar").value === "left" ? -1 : $("maskEar").value === "right" ? 1 : 0;
     if ($("maskEar").value === "off") stopMasker();
     else setMaskerIndicator(true);
@@ -2535,13 +2655,13 @@ async function startMasker() {
   if (state.audio.masker) return;
   try {
     const ctx = ensureAudio();
-    const buffer = await decodeFirstAvailable([CALIBRATION_NOISE_BASE, "calib", "masking"]);
+    const buffer = await decodeFirstAvailable(["noise","masking"]);
     const source = ctx.createBufferSource();
     const gain = ctx.createGain();
 
     source.buffer = buffer;
     source.loop = true;
-    gain.gain.value = gainForLevel(Number($("maskLevel").value));
+    gain.gain.value = gainForLevel(maskerLevel());
     const maskEarVal = $("maskEar").value;
     // Same splitter/merger ear routing as the stimulus path, so the masker's
     // in-ear level matches its on-screen dB regardless of ear (no panner boost).
@@ -2555,7 +2675,7 @@ async function startMasker() {
     setMaskerIndicator(true);
   } catch {
     try {
-      state.audio.masker = await playFirstAvailable([CALIBRATION_NOISE_BASE, "masking"], $("maskEar").value, Number($("maskLevel").value), true);
+      state.audio.masker = await playFirstAvailable(["noise","masking"], $("maskEar").value, maskerLevel(), true);
       $("toggleMaskBtn").textContent = "Stop masker";
       setMaskerIndicator(true);
     } catch {
@@ -2586,7 +2706,7 @@ function toggleMasker() {
 }
 
 function nudgeMasker(delta) {
-  const newVal = (Number($("maskLevelLive").value) || 40) + delta;
+  const newVal = clampLevel((Number($("maskLevelLive").value) || 40) + delta);
   $("maskLevelLive").value = newVal;
   $("maskLevel").value = newVal;
   updateLiveMasker();
@@ -2595,7 +2715,18 @@ function nudgeMasker(delta) {
 function nudgeLevel(delta) {
   const q = currentQueueItem();
   if (!q) return;
-  const newLevel = q.levelDbA + delta;
+  const newLevel = clampLevel(q.levelDbA + delta);
+  if (newLevel === q.levelDbA) {
+    // At a bound: no change to make. Say why, and don't fire the discard prompt
+    // on a keypress that was never going to change anything.
+    const b = levelBounds();
+    if (b) {
+      flashLevelLimit(newLevel >= b.max
+        ? `${b.max} dB(A) is the calibration reference — to go higher, ${moreLevelAdvice()}.`
+        : `${b.min} dB(A) is the bottom of the range — to go lower, ${lessLevelAdvice()}.`);
+    }
+    return;
+  }
   const qLang = q.language || "maori";
 
   // Check if results exist for the current list (this language, list & level)
@@ -2640,8 +2771,19 @@ function updateLevelDisplay() {
   if (!q) return;
   const el = $("levelNudgeLabel");
   if (el) el.textContent = String(q.levelDbA);
-  // The SNR shown on the masker pill depends on the stimulus level too.
-  if (state.audio.masker) setMaskerIndicator(true);
+
+  const b = levelBounds();
+  if ($("levelDownBtn")) $("levelDownBtn").disabled = !!b && q.levelDbA <= b.min;
+  if ($("levelUpBtn"))   $("levelUpBtn").disabled   = !!b && q.levelDbA >= b.max;
+
+  const risk = combinedClippingRisk();
+  if (risk) {
+    flashLevelLimit(
+      `Stimulus and masker together exceed full output by ${risk.overshootDb.toFixed(1)} dB ` +
+      `— both will distort. Lower one of the two levels, or ${moreLevelAdvice()}.`
+    );
+  }
+
   updateRunningScore();
   refreshPI();
 }
@@ -2712,7 +2854,7 @@ function advanceTrialNow(trial, q) {
     stimulusEar: $("stimEar").value,
     transducer: $("transducer") ? $("transducer").value : "",
     maskerEar: $("maskEar").value,
-    maskerLevelDbA: Number($("maskLevel").value),
+    maskerLevelDbA: maskerLevel(),
     trialOrder: trial.order,
     presentedWord: trial.word[0],
     targetPhonemes: targets,
@@ -2722,7 +2864,7 @@ function advanceTrialNow(trial, q) {
     selectedTargetCorrectness: state.scoringMode === "fast" ? blankSelections() : [...state.targetSelections],
     score,
     percent: Math.round((score / targets.length) * 100),
-    maskerLevelReport: $("maskEar").value === "off" ? "none" : Number($("maskLevel").value),
+    maskerLevelReport: $("maskEar").value === "off" ? "none" : maskerLevel(),
     comment: $("trialComment").value.trim(),
     ...(trainingActive() ? {
       training: true,
@@ -3218,7 +3360,10 @@ function buildTsv() {
     ["Session date", state.client.date || ""],
     ["Clinician", state.client.clinician || ""],
     ["Notes", state.client.notes || ""],
-    ["Calibration dB(A)", state.calibration?.isCalibrated ? state.calibration.measuredDbA : "not set"],
+    ["Calibration method", state.calibration?.isCalibrated ? calMethodInfo().label : "uncalibrated"],
+    ["Calibration reference dB(A)", state.calibration?.isCalibrated ? state.calibration.measuredDbA : "not set"],
+    ["Presentation range dB(A)", (() => { const b = levelBounds(); return b && b.usable ? `${b.min}–${b.max}` : "—"; })()],
+    ["Calibration time", state.calibration?.timestamp || "—"],
     ["Default presentation condition", $("presentationCondition") ? conditionLabel($("presentationCondition").value) : ""],
     ["Stimulus routing", $("stimEar") ? $("stimEar").value : ""],
     ["Transducer", $("transducer") ? $("transducer").value : ""],
@@ -3348,7 +3493,10 @@ function showReport() {
       <div>
         <p><b>Clinician:</b> ${state.client.clinician || ""}${state.client.role ? " — " + state.client.role : ""}</p>
         <p><b>Facility:</b> ${state.client.facility || ""}</p>
-        <p><b>Calibration:</b> ${state.calibration.isCalibrated ? state.calibration.measuredDbA + " dB(A)" : "not set"}</p>
+        <p><b>Calibration:</b> ${state.calibration.isCalibrated
+          ? `${state.calibration.measuredDbA} dB(A) reference (${calMethodInfo().label})`
+            + (() => { const b = levelBounds(); return b && b.usable ? `, presented ${b.min}–${b.max} dB(A)` : ""; })()
+          : "not set"}</p>
         <p><b>Notes:</b> ${state.client.notes || ""}</p>
       </div>
     </div>
