@@ -358,9 +358,18 @@
         </select>
       </label>
       <ol id="calSteps" class="cal-steps"></ol>
-      <div class="actions wrap">
+      <div class="actions wrap" style="align-items:center;gap:.5rem">
         <button id="calPlayBtn" type="button">▶ Play calibration noise</button>
+        <label id="calEarWrap" style="display:flex;align-items:center;gap:.35rem;font-size:.85rem;margin:0">
+          Route to
+          <select id="calEarSelect" style="width:auto">
+            <option value="left">Left only</option>
+            <option value="right">Right only</option>
+            <option value="binaural">Both</option>
+          </select>
+        </label>
       </div>
+      <p id="calEarHint" class="hint" style="font-size:.8rem"></p>
       <label>
         <span id="calLevelLabelText">Audiometer dial setting, dB(A)</span>
         <input id="calLevelInput" type="number" step="5" inputmode="decimal">

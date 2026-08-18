@@ -235,7 +235,9 @@ const state = {
     maskerGain: null,
     calSource: null,
     calNode: null,
+    calRouter: null,
     testCalNode: null,
+    rateMismatch: null,
     activeStimuli: [],
     decodedBuffers: {}
   }
@@ -1342,6 +1344,7 @@ function bindEvents() {
   $("calibrateBtn").onclick = openCalibrationDialog;
   if ($("calMethodSelect")) $("calMethodSelect").onchange = renderCalMethodUI;
   if ($("calPlayBtn")) $("calPlayBtn").onclick = toggleCalibrationNoise;
+  if ($("calEarSelect")) $("calEarSelect").onchange = (e) => setCalibrationEar(e.target.value);
   if ($("calSaveBtn")) $("calSaveBtn").onclick = saveCalibrationDialog;
   // Catches Cancel, Esc and Save alike — the noise must never outlive the dialog.
   if ($("calibrationDialog")) $("calibrationDialog").addEventListener("close", () => {
@@ -1523,15 +1526,72 @@ function bindEvents() {
 }
 
 
+// The kupu, carriers, masker and calibration noise are all 48 kHz mp3. The
+// AudioContext must run at the same rate: when context and media agree, no
+// resampling happens on the media-element path — which is where iOS Safari
+// otherwise gets the ratio wrong.
+const ASSET_SAMPLE_RATE = 48000;
+
 function ensureAudio() {
   if (!state.audio.ctx) {
-    state.audio.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // On iOS the audio-session category IN FORCE AT CONSTRUCTION decides the
+    // hardware rate: if it isn't "playback" when the context is built, iOS hands
+    // out a 24 kHz context and every 48 kHz asset plays at half speed (ratio
+    // exactly 2 — the tell-tale signature), with wrong level and spectrum. This
+    // must be set BEFORE the constructor runs, not after.
+    try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch {}
+    const Ctor = window.AudioContext || window.webkitAudioContext;
+    // Ask for the asset rate. If the browser refuses the hint we still get a
+    // context; either way the rate is checked below so a mismatch surfaces in
+    // the console rather than as "it sounded a bit off / the level looked wrong".
+    try { state.audio.ctx = new Ctor({ sampleRate: ASSET_SAMPLE_RATE }); }
+    catch { state.audio.ctx = new Ctor(); }
+
+    const rate = state.audio.ctx.sampleRate;
+    if (rate !== ASSET_SAMPLE_RATE) {
+      const ratio = ASSET_SAMPLE_RATE / rate;
+      const halfSpeed = Math.abs(ratio - 2) < 0.01;
+      console.warn(
+        `[audio] AudioContext is ${rate} Hz but assets are ${ASSET_SAMPLE_RATE} Hz — RATE MISMATCH.` +
+        (halfSpeed
+          ? " Exactly half: this is the iOS 50%-speed signature (a 24 kHz context " +
+            "handed out because the audio session was not 'playback' at construction). " +
+            "Playback will be slow AND the presented level will be wrong — do not " +
+            "calibrate or test in this state."
+          : " If playback sounds slow or fast, or the level looks off, this is why.")
+      );
+      state.audio.rateMismatch = { contextRate: rate, assetRate: ASSET_SAMPLE_RATE, ratio };
+      renderRateWarning();
+    } else {
+      state.audio.rateMismatch = null;
+      console.log(`[audio] AudioContext ${rate} Hz (matches assets)`);
+    }
   }
   // iOS suspends AudioContext until a user gesture — resume on every call
   if (state.audio.ctx.state === "suspended") {
     state.audio.ctx.resume().catch(() => {});
   }
   return state.audio.ctx;
+}
+
+// Surface a rate mismatch in the UI, not just the console — a clinician cannot
+// be expected to have devtools open, and calibrating at the wrong rate produces
+// a silently wrong reference. Paints into #calStatus / #calDialogStatus if
+// present; harmless if neither exists.
+function renderRateWarning() {
+  const m = state.audio.rateMismatch;
+  if (!m) return;
+  const msg = `⚠ Audio is running at ${m.contextRate} Hz but the recordings are ` +
+    `${m.assetRate} Hz. ` +
+    (Math.abs(m.ratio - 2) < 0.01
+      ? "This halves playback speed and makes the level wrong. Close the app fully " +
+        "and reopen it (on iPhone/iPad, swipe it away from the app switcher first); "
+      : "Playback speed and level may be wrong; try reopening the app; ") +
+    "do not rely on calibration until this clears.";
+  const dlg = $("calDialogStatus");
+  if (dlg) dlg.textContent = msg;
+  const cal = $("calStatus");
+  if (cal) cal.textContent = msg;
 }
 
 function soundKey(filename) {
@@ -1758,10 +1818,16 @@ function pickKoreroMai() {
 }
 
 // Route an input node to the left ear, right ear, or both, without the
-// equal-power boost a StereoPannerNode applies. The input is collapsed to mono
-// (both source channels averaged to −6 dB each, summing to unity for correlated
-// stereo — i.e. equal-energy dual-mono lands at the same level the calibration
-// path produces) and then sent only to the chosen output channel(s) at unity.
+// equal-power boost a StereoPannerNode applies. A mono source is up-mixed to
+// dual-mono (identical L and R at unchanged level) so single-ear presentation of
+// a mono file isn't silent; a stereo source passes through per channel at unity.
+// The non-test ear is then multiplied by zero and the test ear passed through
+// UNCHANGED — no panning, no summing, no downmix, no level compensation.
+//
+// This is the ONLY path to the destination for stimuli, masker, calibration
+// noise and the test tone alike, so the calibration reference is measured on the
+// identical graph the words play through and any channel-handling effect cancels
+// out of the calibration rather than biasing it. (Matches the UC KTT router.)
 // Returns a handle exposing `.setEar()` so live callers (masker) can re-route.
 function makeEarRouter(ctx, inputNode, ear) {
   // Route to the test ear(s) by muting the non-test channel and passing the test
@@ -2060,6 +2126,7 @@ function stopCalibrationSound() {
     try { state.audio.calNode.stop(); } catch {}
     state.audio.calNode = null;
   }
+  state.audio.calRouter = null;
 }
 
 function openCalibrationDialog() {
@@ -2090,6 +2157,20 @@ function renderCalMethodUI() {
       `level you'll need, plus a little margin — at least 6 dB if you'll be masking.`
     : `This is the most this setup can deliver with the device at full volume. The ` +
       `calibration is valid only for this speaker, seat and room — recalibrate if any change.`;
+  // Per-channel routing is an audiometer concern: the aux input is calibrated one
+  // channel at a time. In sound field there's a single meter at the head, so the
+  // selector is hidden and the noise plays to both.
+  const earWrap = $("calEarWrap"), earHint = $("calEarHint");
+  if (earWrap) earWrap.style.display = sel === "audiometer" ? "" : "none";
+  if (earHint) {
+    earHint.textContent = sel === "audiometer"
+      ? "Calibrate each channel separately: route to Left, set the aux gain, then Right."
+      : "";
+  }
+  if (sel !== "audiometer" && $("calEarSelect")) {
+    $("calEarSelect").value = "binaural";
+    setCalibrationEar("binaural");
+  }
 }
 
 async function toggleCalibrationNoise() {
@@ -2105,6 +2186,9 @@ async function toggleCalibrationNoise() {
   stopCurrentStimulusIfAny();
   stopTestCalibratedSound();
   ensureAudio();
+  // If the context came back at the wrong rate, calibrating now would set a
+  // silently wrong reference. Refuse and say why.
+  if (state.audio.rateMismatch) { renderRateWarning(); return; }
 
   let buffer;
   try {
@@ -2118,13 +2202,37 @@ async function toggleCalibrationNoise() {
   const source = state.audio.ctx.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
-  source.connect(state.audio.ctx.destination);   // unity gain: this IS the reference
+  // Route through the SAME stereoize/split/merge graph a stimulus uses, at unity.
+  // The calibration reference must be measured on the identical signal path the
+  // words play through, or any channel-count / up-mix effect would apply to one
+  // and not the other and the on-screen dB would drift from the presented dB.
+  // Audiometer calibration is done per channel, so honour the ear selector: the
+  // clinician sets the aux-input gain for each channel in turn.
+  const calGain = state.audio.ctx.createGain();
+  calGain.gain.value = 1;                 // unity: this IS the reference
+  source.connect(calGain);
+  const ear = $("calEarSelect") ? $("calEarSelect").value : "binaural";
+  state.audio.calRouter = makeEarRouter(state.audio.ctx, calGain, ear);
   source.start();
   state.audio.calNode = source;
 
   btn.textContent = "■ Stop calibration noise";
   btn.classList.add("active");
-  $("calDialogStatus").textContent = "Calibration noise playing at full output.";
+  $("calDialogStatus").textContent = calNoiseStatusText(ear);
+}
+
+// Live re-route while the noise plays, so the clinician can flip between
+// channels without restarting the tone. No-op if not currently playing.
+function setCalibrationEar(ear) {
+  if (state.audio.calRouter) state.audio.calRouter.setEar(ear);
+  if (state.audio.calNode) $("calDialogStatus").textContent = calNoiseStatusText(ear);
+}
+
+function calNoiseStatusText(ear) {
+  const where = ear === "left" ? "left channel only"
+              : ear === "right" ? "right channel only"
+              : "both channels";
+  return `Calibration noise playing at full output — ${where}.`;
 }
 
 function saveCalibrationDialog() {
@@ -2171,7 +2279,11 @@ async function testCalibratedSound() {
   source.buffer = buffer;
   source.loop = true;
   gain.gain.value = gainForLevel(state.calibration.currentSliderDb);
-  source.connect(gain).connect(state.audio.ctx.destination);
+  // Same graph as a real stimulus (and as the calibration noise): source → gain
+  // → ear router → destination, binaural. This is what lets a clinician meter
+  // the test tone and read the level a word would actually present at.
+  source.connect(gain);
+  makeEarRouter(state.audio.ctx, gain, "binaural");
   source.start();
 
   state.audio.testCalNode = source;
