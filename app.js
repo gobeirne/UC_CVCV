@@ -229,6 +229,16 @@ const state = {
   dialectSubstitutions: {},
   training: null,
   _trainingBypass: false,
+  // Test mode: "fixed" (the original queue-of-levels flow) or "adaptive".
+  testMode: "fixed",
+  // Live adaptive run; null unless an adaptive track is in progress.
+  // { session, procedure, listNumbers, words, maskerOffsetDb, startLevel,
+  //   currentLevel, results:[], railPending }
+  adaptive: null,
+  // Persisted adaptive UI selections (survive re-render / reload of the form).
+  adaptiveForm: { procedure: "A1", startLevel: 60, nTrials: 20, selectedLists: [] },
+  // Serialisable summaries of completed adaptive tracks (for the report).
+  adaptiveTracks: [],
   audio: {
     ctx: null,
     masker: null,
@@ -473,6 +483,8 @@ function init() {
   updateSetupResultsSummary();
   updateTrainingBadge();
   updateClearClientBtn();
+  applyAdaptiveFormToUI();
+  setTestMode(state.testMode || "fixed");
   startMaoriPreloadWhenIdle();
   // If a restored session is already in English, warm that batch too.
   if (state.language === "english") startEnglishPreloadIfNeeded();
@@ -539,7 +551,12 @@ function saveSession() {
     currentTrials: state.currentTrials,
     results: state.results,
     dialectSubstitutions: state.dialectSubstitutions,
-    training: state.training
+    training: state.training,
+    testMode: state.testMode,
+    adaptiveForm: state.adaptiveForm,
+    // Finished adaptive tracks are summarised (engine instances aren't
+    // serialisable); the per-word data lives in `results`, tagged adaptive.
+    adaptiveTracks: state.adaptiveTracks || []
   };
   localStorage.setItem(key, JSON.stringify(payload));
   renderRecentSessions();
@@ -549,10 +566,17 @@ function updateSetupResultsSummary() {
   const el = $("setupResultsSummary");
   if (!el) return;
   const n = state.results?.length || 0;
-  if (!n) { el.textContent = "No results recorded yet."; return; }
+  const tracks = state.adaptiveTracks || [];
+  if (!n && !tracks.length) { el.textContent = "No results recorded yet."; return; }
+  const lines = [];
+  tracks.forEach((t, i) => {
+    const L = LANGUAGES[t.language] || LANGUAGES.maori;
+    const srt = t.srt != null ? `${t.srt.toFixed(1)} dB(A)` : "no estimate";
+    lines.push(`${L.label} — ${t.procedure} adaptive (track ${i + 1}): SRT ${srt}`);
+  });
   const summaries = listSummaries();
-  const lines = summaries.map(s =>
-    `List ${s.listNumber} @ ${s.level} dB(A) — ${conditionLabel(s.condition)} — ${s.percent}% (${s.trials} trial${s.trials !== 1 ? "s" : ""})`
+  summaries.forEach(s =>
+    lines.push(`List ${s.listNumber} @ ${s.level} dB(A) — ${conditionLabel(s.condition)} — ${s.percent}% (${s.trials} trial${s.trials !== 1 ? "s" : ""})`)
   );
   el.innerHTML = lines.join("<br>");
 }
@@ -680,6 +704,15 @@ function restoreSession() {
   try {
     const parsed = JSON.parse(saved);
     Object.assign(state, parsed);
+    // A live adaptive engine can't be serialised, so a restored session never
+    // resumes a track mid-way: clear any live run and drop an incomplete
+    // synthetic adaptive queue item. Completed tracks live in adaptiveTracks.
+    state.adaptive = null;
+    if (!Array.isArray(state.adaptiveTracks)) state.adaptiveTracks = [];
+    if (!state.adaptiveForm) state.adaptiveForm = { procedure: "A1", startLevel: 60, nTrials: 20, selectedLists: [] };
+    if (Array.isArray(state.queue)) {
+      state.queue = state.queue.filter(q => !(q && q.adaptive && q.status !== "complete"));
+    }
     if (!LANGUAGES[state.language]) state.language = "maori";
     if (!state.randomiseOverride || typeof state.randomiseOverride !== "object") {
       state.randomiseOverride = { maori: null, english: null };
@@ -703,6 +736,8 @@ function restoreSession() {
     updateTrainingBadge();
     if (!state.dialectSubstitutions) state.dialectSubstitutions = {};
     updateClearClientBtn();
+    applyAdaptiveFormToUI();
+    setTestMode(state.testMode || "fixed");
   } catch { alert("Could not restore session — data may be corrupt."); }
 }
 
@@ -1424,9 +1459,12 @@ function bindEvents() {
   if ($("trialEditSaveBtn")) $("trialEditSaveBtn").onclick = saveTrialEditDialog;
 
   // Language selector
-  document.querySelectorAll(".language-btn").forEach(btn => {
+  document.querySelectorAll(".language-btn:not([data-mode])").forEach(btn => {
     btn.onclick = () => setLanguage(btn.dataset.lang);
   });
+
+  // Adaptive mode
+  bindAdaptiveEvents();
 
   // Word-order randomise override (per current language)
   if ($("randomiseOrderToggle")) {
@@ -2568,7 +2606,11 @@ function renderTrial() {
   const c = $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value;
   const trainingTag = trainingActive() ? `🎓 ${state.training.name} — ` : "";
   const noRecording = trainingActive() && !trial.trainingFile ? ` <b>(no training recording for this ${L.unit})</b>` : "";
-  $("currentMeta").innerHTML = `${trainingTag}List ${q.listNumber}, ${q.levelDbA} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length} — <span class="condition-chip" title="Click to change condition">${conditionLabel(c)}</span>${noRecording}`;
+  const listLabel = adaptiveActive()
+    ? `${state.adaptive.procedure} adaptive`
+    : `List ${q.listNumber}`;
+  const levelLabel = adaptiveActive() ? `${Number(q.levelDbA).toFixed(1)}` : `${q.levelDbA}`;
+  $("currentMeta").innerHTML = `${trainingTag}${listLabel}, ${levelLabel} dB(A), trial ${state.currentTrialIndex + 1} of ${state.currentTrials.length} — <span class="condition-chip" title="Click to change condition">${conditionLabel(c)}</span>${noRecording}`;
   const conditionChip = $("currentMeta").querySelector(".condition-chip");
   if (conditionChip) conditionChip.onclick = openConditionDialog;
   if ($("phonemeHeading")) $("phonemeHeading").textContent = `Phoneme scoring - ${word}`;
@@ -3060,6 +3102,8 @@ function nudgeMasker(delta) {
 function nudgeLevel(delta) {
   const q = currentQueueItem();
   if (!q) return;
+  // In adaptive mode the engine owns the level; manual nudges are disabled.
+  if (adaptiveActive()) { flashLevelLimit("The adaptive procedure sets the level automatically."); return; }
   const newLevel = clampLevel(q.levelDbA + delta);
   if (newLevel === q.levelDbA) {
     // At a bound: no change to make. Say why, and don't fire the discard prompt
@@ -3115,11 +3159,17 @@ function updateLevelDisplay() {
   const q = currentQueueItem();
   if (!q) return;
   const el = $("levelNudgeLabel");
-  if (el) el.textContent = String(q.levelDbA);
+  if (el) el.textContent = adaptiveActive() ? Number(q.levelDbA).toFixed(1) : String(q.levelDbA);
 
   const b = levelBounds();
-  if ($("levelDownBtn")) $("levelDownBtn").disabled = !!b && q.levelDbA <= b.min;
-  if ($("levelUpBtn"))   $("levelUpBtn").disabled   = !!b && q.levelDbA >= b.max;
+  if (adaptiveActive()) {
+    // Engine owns the level; disable manual nudges but keep the display live.
+    if ($("levelDownBtn")) $("levelDownBtn").disabled = true;
+    if ($("levelUpBtn"))   $("levelUpBtn").disabled   = true;
+  } else {
+    if ($("levelDownBtn")) $("levelDownBtn").disabled = !!b && q.levelDbA <= b.min;
+    if ($("levelUpBtn"))   $("levelUpBtn").disabled   = !!b && q.levelDbA >= b.max;
+  }
 
   const risk = combinedClippingRisk();
   if (risk) {
@@ -3136,6 +3186,11 @@ function updateLevelDisplay() {
 function updateRunningScore() {
   const el = $("runningScore");
   if (!el) return;
+  if (adaptiveActive()) {
+    const a = state.adaptive;
+    el.textContent = `${a.session.done}/${a.session.total} words`;
+    return;
+  }
   const q = currentQueueItem();
   if (!q) { el.textContent = "—"; return; }
   const listResults = state.results.filter(r =>
@@ -3222,12 +3277,32 @@ function advanceTrialNow(trial, q) {
     } : {})
   };
 
+  // Adaptive runs tag each result with the procedure and the track that
+  // produced this word, so the stored trial data is self-describing.
+  if (adaptiveActive()) {
+    const cur = state.adaptive.session.current();
+    resultPayload.adaptive = true;
+    resultPayload.adaptiveProcedure = state.adaptive.procedure;
+    if (cur) { resultPayload.adaptiveTrack = cur.trackId; resultPayload.adaptivePTarget = cur.pTarget; }
+  }
+
   const existingIdx = state.currentResultIndexByTrial[state.currentTrialIndex];
   if (Number.isFinite(existingIdx)) {
     state.results[existingIdx] = resultPayload;
   } else {
     state.results.push(resultPayload);
     state.currentResultIndexByTrial[state.currentTrialIndex] = state.results.length - 1;
+  }
+
+  // ── Adaptive branch: the engine drives the level and the finish. ──
+  if (adaptiveActive()) {
+    state.currentTrialIndex++;
+    adaptiveOnResult(resultPayload);   // steps the level or finishes the track
+    if (!state.adaptive || !state.adaptive.session.finished) renderTrial();
+    updateRunningScore();
+    updateSetupResultsSummary();
+    saveSession();
+    return;
   }
 
   state.currentTrialIndex++;
@@ -3362,6 +3437,7 @@ function abandonList() {
   const q = currentQueueItem();
   if (!q) return;
   q.status = "abandoned";
+  if (state.adaptive) state.adaptive = null;   // drop any live adaptive engine
   stopMasker();
   saveSession();
   if (state.results?.length) autoSaveJson();
@@ -3374,6 +3450,7 @@ function abandonList() {
 function listSummaries() {
   const map = new Map();
   for (const r of state.results) {
+    if (r.adaptive) continue;   // adaptive trials are summarised per track, not per list/level
     const condition = r.presentationCondition || r.stimulusEar;
     const masked = r.maskerEar && r.maskerEar !== "off";
     const language = r.language || "maori";
@@ -3387,9 +3464,10 @@ function listSummaries() {
   return [...map.values()].map(s => ({ ...s, percent: s.phonemeTotal ? Math.round((s.phonemes / s.phonemeTotal) * 100) : 0 }));
 }
 
-// Which languages currently have any recorded results.
+// Which languages have fixed-level (non-adaptive) results. Adaptive tracks
+// get their own report sections, so they don't drive the per-language blocks.
 function languagesWithResults() {
-  const set = new Set(state.results.map(r => r.language || "maori"));
+  const set = new Set(state.results.filter(r => !r.adaptive).map(r => r.language || "maori"));
   return ["maori", "english"].filter(k => set.has(k));
 }
 
@@ -3757,6 +3835,97 @@ async function copyTsv() {
   }
 }
 
+// Render a finished adaptive track's level path to a PNG data URL for the report.
+function adaptiveTrackToImage(track) {
+  const cv = document.createElement("canvas");
+  cv.width = 460; cv.height = 240;
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height, pad = 36;
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  const log = track.log || [];
+  if (!log.length) return "";
+  const levels = log.map(l => l.level);
+  let ymin = Math.min(...levels), ymax = Math.max(...levels);
+  if (ymin === ymax) { ymin -= 5; ymax += 5; }
+  ymin -= 2; ymax += 2;
+  const n = track.nTrials || log.length;
+  const xFor = i => pad + (W - pad - 8) * (i / Math.max(1, n - 1));
+  const yFor = v => H - pad - (H - pad - 8) * ((v - ymin) / (ymax - ymin));
+  ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, 8); ctx.lineTo(pad, H - pad); ctx.lineTo(W - 8, H - pad); ctx.stroke();
+  ctx.fillStyle = "#64748b"; ctx.font = "11px sans-serif";
+  ctx.fillText(ymax.toFixed(0), 4, yFor(ymax) + 3);
+  ctx.fillText(ymin.toFixed(0), 4, yFor(ymin) + 3);
+  ctx.fillText("dB(A)", 4, 16); ctx.fillText("trial", W - 30, H - 8);
+  const colours = { 1: "#0f62fe", 2: "#da1e28" };
+  [1, 2].forEach(tid => {
+    const pts = log.filter(l => l.trackId === tid);
+    if (!pts.length) return;
+    ctx.strokeStyle = colours[tid]; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    pts.forEach((l, k) => { const x = xFor(l.order - 1), y = yFor(l.level); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+  });
+  log.forEach(l => {
+    const x = xFor(l.order - 1), y = yFor(l.level);
+    ctx.fillStyle = colours[l.trackId] || "#0f62fe";
+    ctx.beginPath(); ctx.arc(x, y, l.reversal ? 4 : 2.5, 0, 2 * Math.PI);
+    if (l.reversal) ctx.fill(); else { ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); }
+  });
+  // SRT line
+  if (track.srt != null) {
+    ctx.strokeStyle = "#16a34a"; ctx.setLineDash([5, 3]); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(pad, yFor(track.srt)); ctx.lineTo(W - 8, yFor(track.srt)); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = "#16a34a"; ctx.fillText(`SRT ${track.srt.toFixed(1)}`, W - 90, yFor(track.srt) - 4);
+  }
+  return cv.toDataURL("image/png");
+}
+
+function buildAdaptiveReportSections() {
+  const tracks = state.adaptiveTracks || [];
+  if (!tracks.length) return "";
+  const blocks = tracks.map((t, i) => {
+    const L = LANGUAGES[t.language] || LANGUAGES.maori;
+    const img = adaptiveTrackToImage(t);
+    const rev = (t.reversalsByTrack || []).map(r => `${Math.round(r.pTarget * 100)}%: ${r.reversals} reversals`).join(", ");
+    const lists = (t.listNumbers || []).join(", ") || "—";
+    const masker = (t.maskerEar && t.maskerEar !== "off")
+      ? `${t.maskerEar}${t.maskerOffsetDb != null ? `, SNR held at ${t.maskerOffsetDb.toFixed(1)} dB` : ""}`
+      : "none";
+    const srt = t.srt != null ? `${t.srt.toFixed(1)} dB(A)` : "not estimated";
+    const slope = t.slope != null ? `${t.slope.toFixed(3)} /dB` : "—";
+    const slopeNote = t.procedure === "A1"
+      ? ` <span class="report-pi-legend">(A1 concentrates trials near 50%; the slope is weakly determined — report the SRT)</span>`
+      : "";
+    const when = t.timestamp ? new Date(t.timestamp).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "short" }) : "";
+    const rows = (t.log || []).map(l =>
+      `<tr><td>${l.order}</td><td>${l.trackId}${l.pTarget != null ? ` (${Math.round(l.pTarget*100)}%)` : ""}</td><td>${l.level.toFixed(1)}</td><td>${l.correct}/${l.phonemes}</td><td>${(l.result*100).toFixed(0)}%</td><td>${l.reversal ? "✓" : ""}</td><td>${l.doubled ? "×2" : ""}</td></tr>`
+    ).join("");
+    return `
+      <section class="report-lang-section">
+        <h2>${L.label} — adaptive ${t.procedure} (track ${i + 1})</h2>
+        <div class="report-grid">
+          <div>
+            <p><b>SRT (50%):</b> ${srt}</p>
+            <p><b>Slope:</b> ${slope}${slopeNote}</p>
+            <p><b>Fit:</b> ${t.nObservations} phoneme observations${t.fitConverged ? "" : " · did not fully converge"}</p>
+          </div>
+          <div>
+            <p><b>Lists:</b> ${lists}</p>
+            <p><b>Start level:</b> ${t.startLevel} dB(A) · <b>Trials:</b> ${t.nTrials}</p>
+            <p><b>Condition:</b> ${conditionLabel(t.condition)} · <b>Masker:</b> ${masker}</p>
+            <p><b>Reversals:</b> ${rev || "—"}${when ? ` · ${when}` : ""}</p>
+          </div>
+        </div>
+        ${img ? `<img class="report-pi" src="${img}" alt="${t.procedure} adaptive track">` : ""}
+        <h3>Adaptive track data</h3>
+        <table class="report-table"><thead><tr><th>#</th><th>Track</th><th>Level dB(A)</th><th>Correct</th><th>%</th><th>Reversal</th><th>Step×2</th></tr></thead><tbody>${rows}</tbody></table>
+      </section>`;
+  });
+  return blocks.join("");
+}
+
 function showReport() {
   readClientForm();
   if (!state.results || !state.results.length) {
@@ -3796,7 +3965,7 @@ function showReport() {
   const langSection = (lk) => {
     const L = LANGUAGES[lk] || LANGUAGES.maori;
     const summaries = allSummaries.filter(s => (s.language || "maori") === lk);
-    const results = state.results.filter(r => (r.language || "maori") === lk);
+    const results = state.results.filter(r => (r.language || "maori") === lk && !r.adaptive);
     const summaryRows = summaries.map(s =>
       `<tr><td>${s.listNumber}</td><td>${s.level}</td><td>${conditionLabel(s.condition || s.ear)}</td><td>${s.masked ? "Yes" : "No"}</td><td>${s.trials}</td><td>${s.percent}%</td></tr>`
     ).join("");
@@ -3817,6 +3986,7 @@ function showReport() {
   };
 
   const sectionsHtml = langs.map(langSection).join("");
+  const adaptiveHtml = buildAdaptiveReportSections();
 
   const logoHtml = state.clinicLogo
     ? `<img src="${state.clinicLogo}" alt="Clinic logo" style="max-height:60px;max-width:200px;object-fit:contain">`
@@ -3848,9 +4018,558 @@ function showReport() {
         <p><b>Notes:</b> ${state.client.notes || ""}</p>
       </div>
     </div>
+    ${adaptiveHtml}
     ${sectionsHtml}
   `;
   show("screen-report");
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ADAPTIVE MODE
+   Drives Brand & Kollmeier A1/A2 tracks using the same playback, scoring,
+   masker and calibration machinery as fixed-level testing. The adaptive
+   run appears to the rest of the app as a single synthetic queue item
+   whose levelDbA is updated by the engine after every word.
+   ═══════════════════════════════════════════════════════════════════ */
+
+function adaptiveActive() { return state.testMode === "adaptive" && !!state.adaptive; }
+
+// ── Mode toggle ──
+function setTestMode(mode) {
+  state.testMode = (mode === "adaptive") ? "adaptive" : "fixed";
+  document.querySelectorAll("[data-mode]").forEach(btn =>
+    btn.classList.toggle("active", btn.dataset.mode === state.testMode));
+  const adaptiveCard = $("adaptiveCard");
+  const queueCard = $("queueCard");
+  if (adaptiveCard) adaptiveCard.hidden = state.testMode !== "adaptive";
+  if (queueCard) queueCard.hidden = state.testMode === "adaptive";
+  if (state.testMode === "adaptive") renderAdaptiveListPicker();
+  saveSession();
+}
+
+// ── Adaptive settings form ──
+function readAdaptiveForm() {
+  const f = state.adaptiveForm || (state.adaptiveForm = {});
+  f.procedure = $("adaptiveProcedure") ? $("adaptiveProcedure").value : "A1";
+  f.startLevel = Number($("adaptiveStartLevel") ? $("adaptiveStartLevel").value : 60);
+  f.nTrials = Math.max(4, Math.round(Number($("adaptiveNTrials") ? $("adaptiveNTrials").value : 20)));
+  return f;
+}
+
+// Push saved adaptive form values into the inputs (used on restore/init).
+function applyAdaptiveFormToUI() {
+  const f = state.adaptiveForm || {};
+  if ($("adaptiveProcedure") && f.procedure) $("adaptiveProcedure").value = f.procedure;
+  if ($("adaptiveStartLevel") && f.startLevel != null) $("adaptiveStartLevel").value = f.startLevel;
+  const proc = f.procedure || "A1";
+  const procDefault = (proc === "A2") ? 30 : 20;
+  if ($("adaptiveNTrials") && f.nTrials != null) {
+    $("adaptiveNTrials").value = f.nTrials;
+    // Only protect the restored value from procedure-driven defaults if it was
+    // deliberately different from this procedure's default; otherwise let
+    // switching procedures keep applying 20/30.
+    state._adaptiveNTrialsTouched = (Number(f.nTrials) !== procDefault);
+  }
+  const a2 = $("a2Targets");
+  if (a2) a2.hidden = (proc !== "A2");
+  renderAdaptiveListPicker();
+}
+
+function applyProcedureDefaults() {
+  const proc = $("adaptiveProcedure") ? $("adaptiveProcedure").value : "A1";
+  // Default trial counts: A1 → 20 (2 lists), A2 → 30 (3 lists). Only auto-set
+  // if the clinician hasn't deliberately typed a different value this session.
+  if ($("adaptiveNTrials") && !state._adaptiveNTrialsTouched) {
+    $("adaptiveNTrials").value = (proc === "A2") ? 30 : 20;
+  }
+  const a2 = $("a2Targets");
+  if (a2) a2.hidden = (proc !== "A2");
+  state.adaptiveForm.procedure = proc;
+  saveSession();
+}
+
+function bkFromForm() {
+  return {
+    a: Number($("bkA") ? $("bkA").value : 1.5) || 1.5,
+    b: Number($("bkB") ? $("bkB").value : 1.41) || 1.41,
+    minStep: Number($("bkMinStep") ? $("bkMinStep").value : 0.25) || 0.25,
+    s50: Number($("bkS50") ? $("bkS50").value : 0.1) || 0.1
+  };
+}
+function floorFromForm() {
+  const v = Number($("bkFloor") ? $("bkFloor").value : 0.05);
+  return Math.min(0.5, Math.max(0, isFinite(v) ? v : 0.05));
+}
+function pTargetsFromForm(proc) {
+  if (proc !== "A2") return [0.5];
+  const p1 = Number($("pTarget1") ? $("pTarget1").value : 0.2);
+  const p2 = Number($("pTarget2") ? $("pTarget2").value : 0.8);
+  return [p1, p2];
+}
+
+// ── List picker (multi-select, ordered) ──
+function renderAdaptiveListPicker() {
+  const box = $("adaptiveListPicker");
+  if (!box) return;
+  box.innerHTML = "";
+  const lists = Object.keys(currentWordLists()).map(Number).sort((a, b) => a - b);
+  const selected = state.adaptiveForm.selectedLists || (state.adaptiveForm.selectedLists = []);
+  lists.forEach(n => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "list-toggle" + (selected.includes(n) ? " selected" : "");
+    const order = selected.indexOf(n);
+    btn.innerHTML = `List ${n}` + (order >= 0 ? `<span class="order-badge">#${order + 1}</span>` : "");
+    btn.onclick = () => {
+      const i = selected.indexOf(n);
+      if (i >= 0) selected.splice(i, 1);
+      else selected.push(n);
+      renderAdaptiveListPicker();
+      updateAdaptiveListStatus();
+      saveSession();
+    };
+    box.appendChild(btn);
+  });
+  updateAdaptiveListStatus();
+}
+
+function selectedAdaptiveWords() {
+  const selected = state.adaptiveForm.selectedLists || [];
+  const lists = currentWordLists();
+  let pool = [];
+  selected.forEach(n => { if (lists[n]) pool = pool.concat(lists[n]); });
+  return pool;
+}
+
+function updateAdaptiveListStatus() {
+  const el = $("adaptiveListStatus");
+  if (!el) return;
+  const selected = state.adaptiveForm.selectedLists || [];
+  const words = selectedAdaptiveWords().length;
+  const need = Math.max(4, Math.round(Number($("adaptiveNTrials") ? $("adaptiveNTrials").value : 20)));
+  if (!selected.length) { el.textContent = "No lists selected."; return; }
+  const shortfall = words < need;
+  el.innerHTML = `${selected.length} list(s), ${words} words available for ${need} trials` +
+    (shortfall ? ` — <span class="danger-text">need ${need - words} more; words will be reused</span>` : ` ✓`);
+}
+
+// ── Starting an adaptive track ──
+function startAdaptiveTrack() {
+  readClientForm();
+  readAdaptiveForm();
+  const proc = state.adaptiveForm.procedure;
+  const nTrials = state.adaptiveForm.nTrials;
+  const startLevel = state.adaptiveForm.startLevel;
+
+  // Bounds check on the starting level.
+  const b = levelBounds();
+  if (b && b.usable && (startLevel < b.min || startLevel > b.max)) {
+    alert(`Starting level ${startLevel} dB(A) is outside the calibrated range ` +
+          `(${b.min}–${b.max} dB(A)). Adjust the starting level or recalibrate.`);
+    return;
+  }
+
+  // Assemble the word pool from the selected lists, in the chosen order.
+  let pool = selectedAdaptiveWords();
+  if (!pool.length) { alert("Select at least one word list for the adaptive track."); return; }
+  // Optionally shuffle within the pool per the language's randomise setting.
+  if (randomiseEnabled(state.language)) pool = shuffle(pool);
+  // Repeat the pool if it is shorter than the trial count.
+  const words = [];
+  for (let i = 0; i < nTrials; i++) words.push(pool[i % pool.length]);
+
+  const session = new Adaptive.AdaptiveSession({
+    procedure: proc,
+    startLevel,
+    nTrials,
+    phonemeCount: phonemeCount(),
+    perUnitFloor: floorFromForm(),
+    bk: bkFromForm(),
+    pTargets: pTargetsFromForm(proc)
+  });
+
+  // Masker offset: if masking is on, hold stimulus−masker constant from the
+  // levels the clinician has dialled in at track start.
+  const maskingOn = $("maskEar") && $("maskEar").value !== "off";
+  const maskerOffset = maskingOn ? (startLevel - maskerLevel()) : null;
+
+  state.adaptive = {
+    session,
+    procedure: proc,
+    listNumbers: (state.adaptiveForm.selectedLists || []).slice(),
+    words,
+    maskerOffsetDb: maskerOffset,
+    startLevel,
+    railHandled: false
+  };
+
+  // Build a synthetic queue entry so the rest of the app treats this like a list.
+  const synthetic = {
+    listNumber: (state.adaptiveForm.selectedLists || []).join("+") || "adaptive",
+    levelDbA: session.current().level,
+    language: state.language,
+    status: "in progress",
+    adaptive: true,
+    id: crypto.randomUUID?.() || String(Date.now())
+  };
+  state.queue = [synthetic];
+  state.currentListIndex = 0;
+  state.currentTrials = words.map((w, i) => ({ order: i + 1, word: w }));
+  state.currentResultIndexByTrial = {};
+  state.currentTrialIndex = 0;
+  state.firstTrialMaskerPrimed = false;
+
+  syncMaskerControls();
+  applyAdaptiveMaskerLevel();      // set masker to follow the first level
+  showAdaptivePanels(true);
+  renderTrial();
+  updateLevelDisplay();
+  startMaskerIfNeeded();
+  renderAdaptiveViews();
+  show("screen-test");
+  saveSession();
+}
+
+// Keep the masker following the current stimulus level at the fixed offset.
+function applyAdaptiveMaskerLevel() {
+  const a = state.adaptive;
+  if (!a || a.maskerOffsetDb == null) return;
+  const q = currentQueueItem();
+  if (!q) return;
+  const target = clampLevel(q.levelDbA - a.maskerOffsetDb);
+  if ($("maskLevel")) $("maskLevel").value = target;
+  if ($("maskLevelLive")) $("maskLevelLive").value = target;
+  if (state.audio.masker) state.audio.masker.gain.gain.value = gainForLevel(target);
+}
+
+// ── The adaptive step, called from advanceTrialNow after a result is stored ──
+// resultPayload is the object just pushed to state.results.
+function adaptiveOnResult(resultPayload) {
+  const a = state.adaptive;
+  if (!a) return;
+  const outcomes = phonemeOutcomeVector(resultPayload);
+  const presentedLevel = resultPayload.listLevelDbA;
+  const out = a.session.record(outcomes, presentedLevel);
+  renderAdaptiveViews();
+
+  if (a.session.finished) { finishAdaptiveTrack(); return; }
+
+  // Compute the next level and check calibration rails.
+  const nextLevel = a.session.current().level;
+  const b = levelBounds();
+  let applied = nextLevel;
+  let railMsg = null;
+  if (b && b.usable) {
+    if (nextLevel > b.max) {
+      applied = b.max;
+      railMsg = `The procedure called for ${nextLevel.toFixed(1)} dB(A), above the ` +
+        `calibrated maximum of ${b.max} dB(A). To go higher, ${moreLevelAdvice()}.`;
+    } else if (nextLevel < b.min) {
+      applied = b.min;
+      railMsg = `The procedure called for ${nextLevel.toFixed(1)} dB(A), below the ` +
+        `bottom of the range (${b.min} dB(A)). To go lower, ${lessLevelAdvice()}.`;
+    }
+  }
+  // Also check the tracked masker won't exceed its rail.
+  if (!railMsg && a.maskerOffsetDb != null && b && b.usable) {
+    const maskTarget = applied - a.maskerOffsetDb;
+    if (maskTarget > b.max || maskTarget < b.min) {
+      railMsg = `The contralateral masker would need ${maskTarget.toFixed(1)} dB(A) to ` +
+        `hold the set SNR, which is outside the calibrated range (${b.min}–${b.max} dB(A)).`;
+    }
+  }
+
+  const q = currentQueueItem();
+  q.levelDbA = applied;
+
+  if (railMsg) {
+    promptAdaptiveRail(railMsg);
+  } else {
+    applyAdaptiveMaskerLevel();
+    updateLevelDisplay();
+  }
+}
+
+// Reconstruct a per-phoneme 0/1 vector from a stored result.
+// Advanced/manual scoring records true per-phoneme correctness; fast scoring
+// records only a count, so we synthesise k ones then zeros (order-agnostic for
+// the likelihood fit, which sums independent Bernoulli terms per word).
+function phonemeOutcomeVector(r) {
+  const m = r.phonemeCount || (r.targetPhonemes ? r.targetPhonemes.length : phonemeCount());
+  if (r.scoringMode !== "fast" && Array.isArray(r.selectedTargetCorrectness) &&
+      Array.isArray(r.responsePhonemes)) {
+    const out = [];
+    for (let i = 0; i < m; i++) {
+      const adv = r.responsePhonemes[i];
+      if (adv !== null && adv !== undefined && adv !== "") {
+        out.push(equivalentForScoring(r.targetPhonemes[i], adv) ? 1 : 0);
+      } else {
+        out.push(r.selectedTargetCorrectness[i] ? 1 : 0);
+      }
+    }
+    return out;
+  }
+  const k = Math.max(0, Math.min(m, Math.round(r.score)));
+  const out = [];
+  for (let i = 0; i < m; i++) out.push(i < k ? 1 : 0);
+  return out;
+}
+
+function promptAdaptiveRail(msg) {
+  const dlg = $("adaptiveRailDialog");
+  const body = $("adaptiveRailBody");
+  if (!dlg || !body) { applyAdaptiveMaskerLevel(); updateLevelDisplay(); return; }
+  body.innerHTML = `<p>${msg}</p><p>You can continue presenting at the limit, or ` +
+    `abandon this adaptive track. Continuing keeps recording data; the estimate will ` +
+    `note that a limit was reached.</p>`;
+  state.adaptive.railHandled = true;
+  dlg.showModal();
+}
+
+// ── Finishing ──
+function finishAdaptiveTrack() {
+  const a = state.adaptive;
+  if (!a) return;
+  const q = currentQueueItem();
+  if (q) q.status = "complete";
+  stopMasker();
+  const fit = a.session.estimate();
+  a.fit = fit;
+
+  // Persist a serialisable summary for the report and session restore.
+  const summary = {
+    timestamp: new Date().toISOString(),
+    procedure: a.procedure,
+    language: state.language,
+    listNumbers: a.listNumbers,
+    startLevel: a.startLevel,
+    nTrials: a.session.total,
+    condition: $("presentationCondition") ? $("presentationCondition").value : $("stimEar").value,
+    stimulusEar: $("stimEar").value,
+    maskerEar: $("maskEar") ? $("maskEar").value : "off",
+    maskerOffsetDb: a.maskerOffsetDb,
+    srt: fit ? fit.srt : null,
+    slope: fit ? fit.slope : null,
+    fitConverged: fit ? fit.converged : false,
+    nObservations: fit ? fit.n : 0,
+    perUnitFloor: a.session.perUnitFloor,
+    reversalsByTrack: a.session.tracks.map(t => ({ pTarget: t.pTarget, reversals: t.reversals })),
+    log: a.session.log.slice()
+  };
+  if (!Array.isArray(state.adaptiveTracks)) state.adaptiveTracks = [];
+  state.adaptiveTracks.push(summary);
+
+  renderAdaptiveViews();
+  showAdaptiveSummary(fit);
+  saveSession();
+}
+
+function showAdaptiveSummary(fit) {
+  const dlg = $("adaptiveSummaryDialog");
+  const body = $("adaptiveSummaryBody");
+  const a = state.adaptive;
+  if (!dlg || !body || !a) return;
+  const reversals = a.session.tracks.map(t => `track ${t.id} (target ${Math.round(t.pTarget*100)}%): ${t.reversals} reversals`).join("; ");
+  let html = `<p><b>${a.procedure}</b> · ${a.session.total} trials · ${reversals}.</p>`;
+  if (fit) {
+    html += `<p style="font-size:1.15rem"><b>SRT (50%): ${fit.srt.toFixed(1)} dB(A)</b></p>`;
+    html += `<p>Fitted slope: ${fit.slope.toFixed(3)} /dB` +
+            `${a.procedure === "A1" ? " <span class=\"hint\">(A1 concentrates trials near 50%, so the slope is weakly determined — report the SRT)</span>" : ""}</p>`;
+    if (!fit.converged) html += `<p class="danger-text">Note: the fit did not fully converge; interpret with caution.</p>`;
+  } else {
+    html += `<p class="danger-text">Not enough data to fit a psychometric function.</p>`;
+  }
+  body.innerHTML = html;
+  dlg.showModal();
+}
+
+// ── Views: track plot + estimate ──
+function showAdaptivePanels(on) {
+  const tabs = $("adaptiveTabs");
+  const panel = $("adaptivePanel");
+  if (tabs) tabs.hidden = !on;
+  if (panel) panel.hidden = !on;
+  // Hide the fixed-mode PI + list navigator while adaptive is showing.
+  const showFixed = !on;
+  ["currentListHeading", "trialNavigator", "piHeading", "piTabs", "piCanvas"].forEach(id => {
+    const el = $(id);
+    if (el) el.style.display = showFixed ? "" : "none";
+  });
+}
+
+function setAdaptiveTab(which) {
+  document.querySelectorAll("[data-atab]").forEach(b =>
+    b.classList.toggle("active", b.dataset.atab === which));
+  if ($("adaptiveTrackView")) $("adaptiveTrackView").hidden = which !== "track";
+  if ($("adaptiveEstimateView")) $("adaptiveEstimateView").hidden = which !== "estimate";
+  if (which === "estimate") renderAdaptiveEstimate();
+}
+
+function renderAdaptiveViews() {
+  if (!adaptiveActive() && !(state.adaptive && state.adaptive.fit)) return;
+  renderAdaptiveTrackPlot();
+  renderAdaptiveEstimate();
+  const a = state.adaptive;
+  const line = $("adaptiveProgressLine");
+  if (line && a) {
+    const cur = a.session.current();
+    if (a.session.finished) {
+      line.innerHTML = `<span class="adaptive-progress-strong">Complete</span> — ${a.session.total} trials.`;
+    } else {
+      line.innerHTML = `Trial <span class="adaptive-progress-strong">${a.session.done + 1}</span> of ${a.session.total}` +
+        (cur ? ` · next at <span class="adaptive-progress-strong">${cur.level.toFixed(1)} dB(A)</span>` +
+               (a.session.tracks.length > 1 ? ` · track ${cur.trackId} (target ${Math.round(cur.pTarget*100)}%)` : "") : "");
+    }
+  }
+}
+
+function renderAdaptiveTrackPlot() {
+  const cv = $("adaptiveTrackCanvas");
+  const a = state.adaptive;
+  if (!cv || !a) return;
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height, pad = 34;
+  ctx.clearRect(0, 0, W, H);
+
+  const log = a.session.log;
+  const levels = log.map(l => l.level);
+  const pending = a.session.finished ? [] : [a.session.current().level];
+  const allLevels = levels.concat(pending);
+  if (!allLevels.length) return;
+  let ymin = Math.min(...allLevels), ymax = Math.max(...allLevels);
+  if (ymin === ymax) { ymin -= 5; ymax += 5; }
+  ymin -= 2; ymax += 2;
+  const n = a.session.total;
+
+  const xFor = i => pad + (W - pad - 8) * (i / Math.max(1, n - 1));
+  const yFor = v => H - pad - (H - pad - 8) * ((v - ymin) / (ymax - ymin));
+
+  // axes
+  ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, 8); ctx.lineTo(pad, H - pad); ctx.lineTo(W - 8, H - pad); ctx.stroke();
+  ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif";
+  ctx.fillText(ymax.toFixed(0), 4, yFor(ymax) + 3);
+  ctx.fillText(ymin.toFixed(0), 4, yFor(ymin) + 3);
+  ctx.fillText("dB(A)", 4, 16);
+  ctx.fillText("trial", W - 30, H - 8);
+
+  // per-track colours
+  const colours = { 1: "#0f62fe", 2: "#da1e28" };
+  // connect points within each track
+  [1, 2].forEach(tid => {
+    const pts = log.filter(l => l.trackId === tid);
+    if (!pts.length) return;
+    ctx.strokeStyle = colours[tid] || "#0f62fe"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    pts.forEach((l, k) => {
+      const x = xFor(l.order - 1), y = yFor(l.level);
+      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  });
+  // markers: filled if reversal, open otherwise; wrong answers marked
+  log.forEach(l => {
+    const x = xFor(l.order - 1), y = yFor(l.level);
+    ctx.fillStyle = colours[l.trackId] || "#0f62fe";
+    ctx.beginPath();
+    ctx.arc(x, y, l.reversal ? 4 : 2.5, 0, 2 * Math.PI);
+    if (l.reversal) ctx.fill(); else { ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); }
+  });
+  // pending next level as a hollow grey marker
+  if (!a.session.finished) {
+    const cur = a.session.current();
+    const x = xFor(a.session.done), y = yFor(cur.level);
+    ctx.strokeStyle = "#94a3b8"; ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+function renderAdaptiveEstimate() {
+  const a = state.adaptive;
+  if (!a) return;
+  const fit = a.session.finished && a.fit ? a.fit : a.session.estimate();
+  const numbers = $("adaptiveEstimateNumbers");
+  if (numbers) {
+    if (fit) {
+      numbers.innerHTML =
+        `<div><span class="big-srt">${fit.srt.toFixed(1)} dB(A)</span> SRT (50%)</div>` +
+        `<div>slope ${fit.slope.toFixed(3)} /dB · ${fit.n} phoneme observations` +
+        `${fit.converged ? "" : " · <span class=\"danger-text\">not converged</span>"}</div>`;
+    } else {
+      numbers.textContent = "Collecting data… the estimate appears once enough words are scored.";
+    }
+  }
+  const cv = $("adaptiveFitCanvas");
+  if (!cv) return;
+  const ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height, pad = 34;
+  ctx.clearRect(0, 0, W, H);
+  const log = a.session.log;
+  if (!log.length) return;
+  const xs = log.map(l => l.level);
+  let xmin = Math.min(...xs), xmax = Math.max(...xs);
+  if (xmin === xmax) { xmin -= 5; xmax += 5; }
+  xmin -= 3; xmax += 3;
+  const xFor = v => pad + (W - pad - 8) * ((v - xmin) / (xmax - xmin));
+  const yFor = p => H - pad - (H - pad - 8) * p;
+
+  // axes
+  ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, 8); ctx.lineTo(pad, H - pad); ctx.lineTo(W - 8, H - pad); ctx.stroke();
+  ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif";
+  ctx.fillText("100%", 2, yFor(1) + 3); ctx.fillText("50%", 6, yFor(0.5) + 3); ctx.fillText("0%", 10, yFor(0) + 3);
+  ctx.fillText("dB(A)", W - 34, H - 8);
+
+  // observed proportion-correct per word (jittered dots)
+  log.forEach(l => {
+    ctx.fillStyle = (l.trackId === 2) ? "rgba(218,30,40,.5)" : "rgba(15,98,254,.5)";
+    ctx.beginPath(); ctx.arc(xFor(l.level), yFor(l.result), 3, 0, 2 * Math.PI); ctx.fill();
+  });
+
+  if (fit) {
+    // fitted curve
+    const pts = a.session.curve(fit, xmin, xmax, 100);
+    ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 2;
+    ctx.beginPath();
+    pts.forEach((p, i) => { const x = xFor(p.x), y = yFor(p.y); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke();
+    // SRT marker at 50%
+    ctx.strokeStyle = "#16a34a"; ctx.setLineDash([4, 3]);
+    ctx.beginPath(); ctx.moveTo(xFor(fit.srt), yFor(0)); ctx.lineTo(xFor(fit.srt), yFor(0.5));
+    ctx.lineTo(xmin < fit.srt ? pad : xFor(fit.srt), yFor(0.5)); ctx.stroke(); ctx.setLineDash([]);
+  }
+}
+
+function bindAdaptiveEvents() {
+  document.querySelectorAll("[data-mode]").forEach(btn => {
+    btn.onclick = () => setTestMode(btn.dataset.mode);
+  });
+  if ($("adaptiveProcedure")) $("adaptiveProcedure").onchange = applyProcedureDefaults;
+  if ($("adaptiveNTrials")) $("adaptiveNTrials").oninput = () => {
+    state._adaptiveNTrialsTouched = true;
+    updateAdaptiveListStatus();
+  };
+  if ($("adaptiveStartLevel")) $("adaptiveStartLevel").onchange = () => { readAdaptiveForm(); saveSession(); };
+  if ($("startAdaptiveBtn")) $("startAdaptiveBtn").onclick = startAdaptiveTrack;
+  document.querySelectorAll("[data-atab]").forEach(btn => {
+    btn.onclick = () => setAdaptiveTab(btn.dataset.atab);
+  });
+  if ($("adaptiveRailContinue")) $("adaptiveRailContinue").onclick = () => {
+    $("adaptiveRailDialog").close();
+    applyAdaptiveMaskerLevel();
+    updateLevelDisplay();
+  };
+  if ($("adaptiveRailAbandon")) $("adaptiveRailAbandon").onclick = () => {
+    $("adaptiveRailDialog").close();
+    state.adaptive = null;
+    stopMasker();
+    show("screen-setup");
+  };
+  if ($("adaptiveSummaryContinue")) $("adaptiveSummaryContinue").onclick = () => {
+    $("adaptiveSummaryDialog").close();
+    updateSetupResultsSummary();
+    show("screen-setup");
+  };
 }
 
 init();

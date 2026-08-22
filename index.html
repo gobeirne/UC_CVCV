@@ -65,6 +65,11 @@
                   <button type="button" id="langMaoriBtn" class="language-btn active" data-lang="maori">Te reo Māori</button>
                   <button type="button" id="langEnglishBtn" class="language-btn" data-lang="english">NZ English</button>
                 </div>
+                <span class="language-selector-label" style="margin-top:.6rem">Test mode</span>
+                <div class="language-toggle" role="tablist">
+                  <button type="button" id="modeFixedBtn" class="language-btn active" data-mode="fixed">Fixed level</button>
+                  <button type="button" id="modeAdaptiveBtn" class="language-btn" data-mode="adaptive">Adaptive (SRT)</button>
+                </div>
                 <label class="randomise-toggle" title="When on, the words in each list are presented in a random order. When off, they follow the listed order.">
                   <input type="checkbox" id="randomiseOrderToggle">
                   <span id="randomiseOrderLabel">Randomise word order</span>
@@ -118,7 +123,77 @@
               </div>
             </div>
 
-            <div class="card">
+            <div class="card" id="adaptiveCard" hidden>
+              <h2>Adaptive procedure</h2>
+              <p class="hint" id="adaptiveIntro">
+                The clinician sets the starting level; the adaptive procedure moves the
+                presentation level after each word to home in on the 50% speech reception
+                threshold (SRT), then fits a psychometric function for the SRT and slope.
+              </p>
+              <div class="grid three">
+                <label>Procedure
+                  <select id="adaptiveProcedure">
+                    <option value="A1" selected>A1 — single track (SRT)</option>
+                    <option value="A2">A2 — dual track (SRT + slope)</option>
+                  </select>
+                </label>
+                <label>Starting level, dB(A)
+                  <input id="adaptiveStartLevel" type="number" step="1" value="60">
+                </label>
+                <label>Number of trials
+                  <input id="adaptiveNTrials" type="number" step="1" min="4" value="20">
+                </label>
+              </div>
+              <p class="hint" id="adaptiveTrialsHint">
+                A1 default 20 trials (2 lists of 10); A2 default 30 trials (3 lists of 10).
+              </p>
+
+              <details id="adaptiveParams">
+                <summary>Brand &amp; Kollmeier parameters</summary>
+                <p class="hint">
+                  These constants are shared by A1 and A2 and by quiet and noise conditions;
+                  the defaults follow Brand &amp; Kollmeier (2002). You rarely need to change them.
+                </p>
+                <div class="grid three">
+                  <label>a (step base)
+                    <input id="bkA" type="number" step="0.01" value="1.5">
+                  </label>
+                  <label>b (step rate)
+                    <input id="bkB" type="number" step="0.01" value="1.41">
+                  </label>
+                  <label>Smallest step, dB
+                    <input id="bkMinStep" type="number" step="0.05" value="0.25">
+                  </label>
+                  <label>Tracking s50
+                    <input id="bkS50" type="number" step="0.01" value="0.1">
+                  </label>
+                  <label>Per-phoneme floor
+                    <input id="bkFloor" type="number" step="0.01" min="0" max="0.5" value="0.05">
+                  </label>
+                </div>
+                <div class="adaptive-target-row" id="a2Targets" hidden>
+                  <label>Track 1 target
+                    <input id="pTarget1" type="number" step="0.05" min="0.05" max="0.95" value="0.2">
+                  </label>
+                  <label>Track 2 target
+                    <input id="pTarget2" type="number" step="0.05" min="0.05" max="0.95" value="0.8">
+                  </label>
+                </div>
+              </details>
+
+              <h3 style="margin-top:1rem">Word lists for this track</h3>
+              <p class="hint">
+                Select the lists to draw words from, in order. The track uses as many words
+                as “Number of trials”, pooling the selected lists.
+              </p>
+              <div id="adaptiveListPicker" class="adaptive-list-picker"></div>
+              <p class="hint" id="adaptiveListStatus">No lists selected.</p>
+              <div class="actions">
+                <button id="startAdaptiveBtn" type="button">▶ Start adaptive track</button>
+              </div>
+            </div>
+
+            <div class="card" id="queueCard">
               <h2>List queue</h2>
               <div class="queue-add-row">
                 <label>List
@@ -284,10 +359,30 @@
           </div>
 
           <aside class="card">
-            <h3>Current list</h3>
+            <div id="adaptiveTabs" class="pi-tabs" hidden>
+              <button type="button" class="pi-tab active" data-atab="track">Track</button>
+              <button type="button" class="pi-tab" data-atab="estimate">Estimate</button>
+            </div>
+
+            <div id="adaptivePanel" hidden>
+              <div id="adaptiveTrackView">
+                <h3 id="adaptiveTrackTitle">Adaptive track</h3>
+                <p class="hint" id="adaptiveProgressLine">—</p>
+                <canvas id="adaptiveTrackCanvas" width="420" height="240"></canvas>
+                <p class="hint">Presentation level (dB(A)) by trial. Reversals shrink the step size.</p>
+              </div>
+              <div id="adaptiveEstimateView" hidden>
+                <h3>Psychometric estimate</h3>
+                <div id="adaptiveEstimateNumbers" class="adaptive-estimate-numbers">—</div>
+                <canvas id="adaptiveFitCanvas" width="420" height="240"></canvas>
+                <p class="hint">Fitted per-phoneme intelligibility. The SRT is the 50% point.</p>
+              </div>
+            </div>
+
+            <h3 id="currentListHeading">Current list</h3>
             <div id="trialNavigator" class="trial-navigator"></div>
 
-            <h3>Performance intensity</h3>
+            <h3 id="piHeading">Performance intensity</h3>
             <div id="piTabs" class="pi-tabs" hidden></div>
             <canvas id="piCanvas" width="420" height="300"></canvas>
             <div class="legend">
@@ -482,6 +577,27 @@
     </form>
   </dialog>
 
+  <dialog id="adaptiveRailDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>Calibration limit reached</h2>
+      <div id="adaptiveRailBody" class="tf-body"></div>
+      <menu>
+        <button id="adaptiveRailAbandon" value="abandon" class="danger" type="button">Abandon track</button>
+        <button id="adaptiveRailContinue" value="continue" type="button">Continue at limit</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <dialog id="adaptiveSummaryDialog">
+    <form method="dialog" class="dialog-card">
+      <h2>Adaptive track complete</h2>
+      <div id="adaptiveSummaryBody" class="tf-body"></div>
+      <menu>
+        <button id="adaptiveSummaryContinue" value="ok">Done ▶</button>
+      </menu>
+    </form>
+  </dialog>
+
   <style>
     /* Training mode additions (self-contained) */
     .card-header-row {
@@ -596,6 +712,7 @@
     }
   </style>
 
+  <script src="adaptive.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
