@@ -1978,8 +1978,21 @@ function gainForLevel(levelDbA) {
     }
     return gain;
   }
-  // Uncalibrated: all files are already level-normalised relative to each other,
-  // so play everything at unity gain and let device volume control the output.
+  // Uncalibrated adaptive: there is no absolute reference, but the whole point
+  // of an adaptive track is the RELATIVE level change between words, and the
+  // stimulus set is level-normalised — so treat the track's starting level as
+  // the unity-gain reference and attenuate below it. Without this, every word
+  // plays at unity and the level never actually changes in the ear.
+  if (adaptiveActive() && state.adaptive && state.adaptive.startLevel != null) {
+    const attenuation = Number(state.adaptive.startLevel) - Number(levelDbA);
+    // attenuation < 0 means "above the starting level"; can't amplify past
+    // unity, so cap and let the rail/level logic surface it.
+    if (attenuation <= 0) return 1;
+    return Math.pow(10, -attenuation / 20);
+  }
+  // Uncalibrated, fixed mode: all files are already level-normalised relative
+  // to each other, so play everything at unity gain and let device volume
+  // control the output.
   return 1.0;
 }
 
@@ -4268,6 +4281,17 @@ function adaptiveOnResult(resultPayload) {
       applied = b.min;
       railMsg = `The procedure called for ${nextLevel.toFixed(1)} dB(A), below the ` +
         `bottom of the range (${b.min} dB(A)). To go lower, ${lessLevelAdvice()}.`;
+    }
+  } else {
+    // Uncalibrated: the starting level is the unity-gain reference, so the
+    // procedure can attenuate below it but cannot go louder without clipping.
+    if (nextLevel > a.startLevel) {
+      applied = a.startLevel;
+      railMsg = `The procedure called for ${nextLevel.toFixed(1)} dB(A), above the ` +
+        `starting level of ${a.startLevel} dB(A). Uncalibrated, the starting level is ` +
+        `the loudest the app can present without clipping — the client is performing ` +
+        `below target at the top of the range. Turn up the device volume and restart, ` +
+        `raise the starting level, or calibrate for an absolute reference.`;
     }
   }
   // Also check the tracked masker won't exceed its rail.
