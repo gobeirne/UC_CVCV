@@ -3849,49 +3849,154 @@ async function copyTsv() {
 }
 
 // Render a finished adaptive track's level path to a PNG data URL for the report.
-function adaptiveTrackToImage(track) {
-  const cv = document.createElement("canvas");
-  cv.width = 460; cv.height = 240;
-  const ctx = cv.getContext("2d");
-  const W = cv.width, H = cv.height, pad = 36;
+// Fixed x-axis range for adaptive figures: −10 to 100 dB(A), matching the
+// A2 demo's word-in-quiet range so the track and psychometric function share
+// exactly the same horizontal scale.
+const ADAPTIVE_X_MIN = -10;
+const ADAPTIVE_X_MAX = 100;
+
+// Marker colour graded red → green across phonemes correct (0..m).
+// 0 correct = red, all correct = green, midway = amber. Semi-transparent.
+function phonemeMarkerColour(correct, total, alpha) {
+  const t = total > 0 ? Math.max(0, Math.min(1, correct / total)) : 0;
+  // red (220,50,50) → amber (230,170,40) → green (40,170,80)
+  let r, g, b;
+  if (t < 0.5) {
+    const u = t / 0.5;
+    r = 220 + (230 - 220) * u; g = 50 + (170 - 50) * u; b = 50 + (40 - 50) * u;
+  } else {
+    const u = (t - 0.5) / 0.5;
+    r = 230 + (40 - 230) * u; g = 170 + (170 - 170) * u; b = 40 + (80 - 40) * u;
+  }
+  return `rgba(${Math.round(r)},${Math.round(g)},${Math.round(b)},${alpha == null ? 0.55 : alpha})`;
+}
+
+/* Draw the combined adaptive figure into a 2D context, matching the A2 demo's
+   arrangement: two stacked panels sharing one dB(A) x-axis (−10..100).
+     • Top panel  — psychometric function: fitted curve, per-word markers
+       (coloured by phonemes correct), and a dashed 50% line that meets the
+       curve then drops to the SRT on the axis.
+     • Bottom panel — the adaptive track drawn "sideways": presentation level
+       on the shared x-axis, trial index climbing down the panel, so each
+       word sits directly under its level on the psychometric plot.
+   spec = { log, srt, slope, floor, phonemeCount, nTrials }  */
+function drawAdaptiveCombined(ctx, W, H, spec) {
+  const log = spec.log || [];
+  ctx.clearRect(0, 0, W, H);
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
-  const log = track.log || [];
-  if (!log.length) return "";
-  const levels = log.map(l => l.level);
-  let ymin = Math.min(...levels), ymax = Math.max(...levels);
-  if (ymin === ymax) { ymin -= 5; ymax += 5; }
-  ymin -= 2; ymax += 2;
-  const n = track.nTrials || log.length;
-  const xFor = i => pad + (W - pad - 8) * (i / Math.max(1, n - 1));
-  const yFor = v => H - pad - (H - pad - 8) * ((v - ymin) / (ymax - ymin));
+  if (!log.length) return;
+
+  const padL = 42, padR = 12, padTop = 10, gap = 26, axisH = 18;
+  const plotW = W - padL - padR;
+  // Two equal panels with a gap and a shared axis label strip between them.
+  const panelH = (H - padTop - axisH - gap) / 2;
+  const topY0 = padTop, topY1 = padTop + panelH;                 // proportion 1→0
+  const botY0 = topY1 + gap + axisH, botY1 = botY0 + panelH;     // trial 0→n
+
+  const xMin = ADAPTIVE_X_MIN, xMax = ADAPTIVE_X_MAX;
+  const xFor = dB => padL + plotW * ((dB - xMin) / (xMax - xMin));
+  const yTop = p => topY1 - (topY1 - topY0) * p;                 // proportion correct
+  const n = spec.nTrials || log.length;
+  const yBot = i => botY0 + (botY1 - botY0) * (i / Math.max(1, n - 1)); // trial index
+
+  // ── shared x-axis grid + ticks (drawn once, spanning both panels) ──
+  ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1;
+  ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif"; ctx.textAlign = "center";
+  for (let dB = xMin; dB <= xMax; dB += 10) {
+    const x = xFor(dB);
+    ctx.beginPath(); ctx.moveTo(x, topY0); ctx.lineTo(x, topY1); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x, botY0); ctx.lineTo(x, botY1); ctx.stroke();
+    ctx.fillText(String(dB), x, topY1 + axisH - 4);
+  }
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#334155"; ctx.font = "11px sans-serif";
+  ctx.fillText("Presentation level dB(A)", padL, topY1 + axisH + gap / 2 + 3);
+
+  // ── TOP PANEL: psychometric function ──
+  // panel frame
   ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(pad, 8); ctx.lineTo(pad, H - pad); ctx.lineTo(W - 8, H - pad); ctx.stroke();
-  ctx.fillStyle = "#64748b"; ctx.font = "11px sans-serif";
-  ctx.fillText(ymax.toFixed(0), 4, yFor(ymax) + 3);
-  ctx.fillText(ymin.toFixed(0), 4, yFor(ymin) + 3);
-  ctx.fillText("dB(A)", 4, 16); ctx.fillText("trial", W - 30, H - 8);
-  const colours = { 1: "#0f62fe", 2: "#da1e28" };
+  ctx.strokeRect(padL, topY0, plotW, topY1 - topY0);
+  // y ticks 0 / 50 / 100 %
+  ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif"; ctx.textAlign = "right";
+  [[1, "100%"], [0.5, "50%"], [0, "0%"]].forEach(([p, lbl]) => {
+    ctx.fillText(lbl, padL - 4, yTop(p) + 3);
+  });
+  ctx.textAlign = "left";
+  ctx.save(); ctx.translate(12, (topY0 + topY1) / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillStyle = "#334155"; ctx.font = "11px sans-serif"; ctx.textAlign = "center";
+  ctx.fillText("proportion correct", 0, 0); ctx.restore(); ctx.textAlign = "left";
+
+  // per-word markers, coloured by phonemes correct
+  log.forEach(l => {
+    ctx.fillStyle = phonemeMarkerColour(l.correct, l.phonemes, 0.55);
+    ctx.beginPath(); ctx.arc(xFor(l.level), yTop(l.result), 5, 0, 2 * Math.PI); ctx.fill();
+  });
+
+  // fitted curve + SRT drop-line
+  if (spec.srt != null && spec.slope != null) {
+    const floor = spec.floor != null ? spec.floor : Adaptive.DEFAULT_PER_UNIT_FLOOR;
+    ctx.strokeStyle = "rgb(64,64,64)"; ctx.lineWidth = 2; ctx.beginPath();
+    for (let k = 0; k <= 120; k++) {
+      const dB = xMin + (xMax - xMin) * (k / 120);
+      const y = yTop(Adaptive.perUnitCurve(dB, spec.srt, spec.slope, floor));
+      k ? ctx.lineTo(xFor(dB), y) : ctx.moveTo(xFor(dB), y);
+    }
+    ctx.stroke();
+    // dashed 50% line: horizontal from left axis to the curve at SRT, then down to axis
+    const srtInRange = spec.srt >= xMin && spec.srt <= xMax;
+    ctx.strokeStyle = "#16a34a"; ctx.setLineDash([5, 3]); ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padL, yTop(0.5));
+    ctx.lineTo(srtInRange ? xFor(spec.srt) : padL + plotW, yTop(0.5));
+    if (srtInRange) { ctx.lineTo(xFor(spec.srt), yTop(0)); }
+    ctx.stroke(); ctx.setLineDash([]);
+    if (srtInRange) {
+      ctx.fillStyle = "#16a34a"; ctx.font = "11px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(`SRT ${spec.srt.toFixed(1)}`, xFor(spec.srt), yTop(0) - 4);
+      ctx.textAlign = "left";
+    }
+  }
+
+  // ── BOTTOM PANEL: adaptive track drawn sideways (level on shared x) ──
+  ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1;
+  ctx.strokeRect(padL, botY0, plotW, botY1 - botY0);
+  ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif"; ctx.textAlign = "right";
+  ctx.fillText("trial 1", padL - 4, yBot(0) + 3);
+  ctx.fillText(`${n}`, padL - 4, yBot(n - 1) + 3);
+  ctx.textAlign = "left";
+  const trackColours = { 1: "#0f62fe", 2: "#7c3aed" };
   [1, 2].forEach(tid => {
     const pts = log.filter(l => l.trackId === tid);
     if (!pts.length) return;
-    ctx.strokeStyle = colours[tid]; ctx.lineWidth = 1.5;
+    ctx.strokeStyle = trackColours[tid]; ctx.globalAlpha = 0.7; ctx.lineWidth = 1.5;
     ctx.beginPath();
-    pts.forEach((l, k) => { const x = xFor(l.order - 1), y = yFor(l.level); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-    ctx.stroke();
+    pts.forEach((l, k) => { const x = xFor(l.level), y = yBot(l.order - 1); k ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+    ctx.stroke(); ctx.globalAlpha = 1;
   });
   log.forEach(l => {
-    const x = xFor(l.order - 1), y = yFor(l.level);
-    ctx.fillStyle = colours[l.trackId] || "#0f62fe";
-    ctx.beginPath(); ctx.arc(x, y, l.reversal ? 4 : 2.5, 0, 2 * Math.PI);
-    if (l.reversal) ctx.fill(); else { ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); }
+    ctx.fillStyle = phonemeMarkerColour(l.correct, l.phonemes, 0.7);
+    ctx.beginPath(); ctx.arc(xFor(l.level), yBot(l.order - 1), 3.5, 0, 2 * Math.PI); ctx.fill();
   });
-  // SRT line
-  if (track.srt != null) {
+  // SRT vertical reference across the track panel
+  if (spec.srt != null && spec.srt >= xMin && spec.srt <= xMax) {
     ctx.strokeStyle = "#16a34a"; ctx.setLineDash([5, 3]); ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(pad, yFor(track.srt)); ctx.lineTo(W - 8, yFor(track.srt)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(xFor(spec.srt), botY0); ctx.lineTo(xFor(spec.srt), botY1); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = "#16a34a"; ctx.fillText(`SRT ${track.srt.toFixed(1)}`, W - 90, yFor(track.srt) - 4);
   }
+}
+
+function adaptiveTrackToImage(track) {
+  const cv = document.createElement("canvas");
+  cv.width = 620; cv.height = 460;
+  const ctx = cv.getContext("2d");
+  drawAdaptiveCombined(ctx, cv.width, cv.height, {
+    log: track.log || [],
+    srt: track.srt,
+    slope: track.slope,
+    floor: track.perUnitFloor,
+    phonemeCount: track.phonemeCount,
+    nTrials: track.nTrials
+  });
   return cv.toDataURL("image/png");
 }
 
@@ -3931,7 +4036,8 @@ function buildAdaptiveReportSections() {
             <p><b>Reversals:</b> ${rev || "—"}${when ? ` · ${when}` : ""}</p>
           </div>
         </div>
-        ${img ? `<img class="report-pi" src="${img}" alt="${t.procedure} adaptive track">` : ""}
+        ${img ? `<img class="report-pi" src="${img}" alt="${t.procedure} psychometric function and adaptive track">` : ""}
+        <p class="report-pi-legend">Top: fitted psychometric function with per-word markers; the dashed line marks 50% and drops to the SRT. Bottom: the adaptive track on the same dB(A) scale. Marker colour runs red (0 phonemes correct) → green (all ${t.phonemeCount || (L.phonemeCount)} correct).</p>
         <h3>Adaptive track data</h3>
         <table class="report-table"><thead><tr><th>#</th><th>Track</th><th>Level dB(A)</th><th>Correct</th><th>%</th><th>Reversal</th><th>Step×2</th></tr></thead><tbody>${rows}</tbody></table>
       </section>`;
@@ -4377,6 +4483,7 @@ function finishAdaptiveTrack() {
     fitConverged: fit ? fit.converged : false,
     nObservations: fit ? fit.n : 0,
     perUnitFloor: a.session.perUnitFloor,
+    phonemeCount: a.session.phonemeCount,
     reversalsByTrack: a.session.tracks.map(t => ({ pTarget: t.pTarget, reversals: t.reversals })),
     log: a.session.log.slice()
   };
@@ -4447,71 +4554,36 @@ function renderAdaptiveViews() {
   }
 }
 
+// Build the drawing spec from the live session (uses the running fit).
+function liveAdaptiveSpec() {
+  const a = state.adaptive;
+  if (!a) return null;
+  const fit = (a.session.finished && a.fit) ? a.fit : a.session.estimate();
+  return {
+    log: a.session.log,
+    srt: fit ? fit.srt : null,
+    slope: fit ? fit.slope : null,
+    floor: a.session.perUnitFloor,
+    phonemeCount: a.session.phonemeCount,
+    nTrials: a.session.total,
+    fit
+  };
+}
+
 function renderAdaptiveTrackPlot() {
   const cv = $("adaptiveTrackCanvas");
   const a = state.adaptive;
   if (!cv || !a) return;
-  const ctx = cv.getContext("2d");
-  const W = cv.width, H = cv.height, pad = 34;
-  ctx.clearRect(0, 0, W, H);
-
-  const log = a.session.log;
-  const levels = log.map(l => l.level);
-  const pending = a.session.finished ? [] : [a.session.current().level];
-  const allLevels = levels.concat(pending);
-  if (!allLevels.length) return;
-  let ymin = Math.min(...allLevels), ymax = Math.max(...allLevels);
-  if (ymin === ymax) { ymin -= 5; ymax += 5; }
-  ymin -= 2; ymax += 2;
-  const n = a.session.total;
-
-  const xFor = i => pad + (W - pad - 8) * (i / Math.max(1, n - 1));
-  const yFor = v => H - pad - (H - pad - 8) * ((v - ymin) / (ymax - ymin));
-
-  // axes
-  ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(pad, 8); ctx.lineTo(pad, H - pad); ctx.lineTo(W - 8, H - pad); ctx.stroke();
-  ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif";
-  ctx.fillText(ymax.toFixed(0), 4, yFor(ymax) + 3);
-  ctx.fillText(ymin.toFixed(0), 4, yFor(ymin) + 3);
-  ctx.fillText("dB(A)", 4, 16);
-  ctx.fillText("trial", W - 30, H - 8);
-
-  // per-track colours
-  const colours = { 1: "#0f62fe", 2: "#da1e28" };
-  // connect points within each track
-  [1, 2].forEach(tid => {
-    const pts = log.filter(l => l.trackId === tid);
-    if (!pts.length) return;
-    ctx.strokeStyle = colours[tid] || "#0f62fe"; ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    pts.forEach((l, k) => {
-      const x = xFor(l.order - 1), y = yFor(l.level);
-      if (k === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-  });
-  // markers: filled if reversal, open otherwise; wrong answers marked
-  log.forEach(l => {
-    const x = xFor(l.order - 1), y = yFor(l.level);
-    ctx.fillStyle = colours[l.trackId] || "#0f62fe";
-    ctx.beginPath();
-    ctx.arc(x, y, l.reversal ? 4 : 2.5, 0, 2 * Math.PI);
-    if (l.reversal) ctx.fill(); else { ctx.strokeStyle = ctx.fillStyle; ctx.stroke(); }
-  });
-  // pending next level as a hollow grey marker
-  if (!a.session.finished) {
-    const cur = a.session.current();
-    const x = xFor(a.session.done), y = yFor(cur.level);
-    ctx.strokeStyle = "#94a3b8"; ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.arc(x, y, 4, 0, 2 * Math.PI); ctx.stroke(); ctx.setLineDash([]);
-  }
+  const spec = liveAdaptiveSpec();
+  if (!spec) return;
+  drawAdaptiveCombined(cv.getContext("2d"), cv.width, cv.height, spec);
 }
 
 function renderAdaptiveEstimate() {
   const a = state.adaptive;
   if (!a) return;
-  const fit = a.session.finished && a.fit ? a.fit : a.session.estimate();
+  const spec = liveAdaptiveSpec();
+  const fit = spec && spec.fit;
   const numbers = $("adaptiveEstimateNumbers");
   if (numbers) {
     if (fit) {
@@ -4524,44 +4596,8 @@ function renderAdaptiveEstimate() {
     }
   }
   const cv = $("adaptiveFitCanvas");
-  if (!cv) return;
-  const ctx = cv.getContext("2d");
-  const W = cv.width, H = cv.height, pad = 34;
-  ctx.clearRect(0, 0, W, H);
-  const log = a.session.log;
-  if (!log.length) return;
-  const xs = log.map(l => l.level);
-  let xmin = Math.min(...xs), xmax = Math.max(...xs);
-  if (xmin === xmax) { xmin -= 5; xmax += 5; }
-  xmin -= 3; xmax += 3;
-  const xFor = v => pad + (W - pad - 8) * ((v - xmin) / (xmax - xmin));
-  const yFor = p => H - pad - (H - pad - 8) * p;
-
-  // axes
-  ctx.strokeStyle = "#cbd5e1"; ctx.lineWidth = 1;
-  ctx.beginPath(); ctx.moveTo(pad, 8); ctx.lineTo(pad, H - pad); ctx.lineTo(W - 8, H - pad); ctx.stroke();
-  ctx.fillStyle = "#64748b"; ctx.font = "10px sans-serif";
-  ctx.fillText("100%", 2, yFor(1) + 3); ctx.fillText("50%", 6, yFor(0.5) + 3); ctx.fillText("0%", 10, yFor(0) + 3);
-  ctx.fillText("dB(A)", W - 34, H - 8);
-
-  // observed proportion-correct per word (jittered dots)
-  log.forEach(l => {
-    ctx.fillStyle = (l.trackId === 2) ? "rgba(218,30,40,.5)" : "rgba(15,98,254,.5)";
-    ctx.beginPath(); ctx.arc(xFor(l.level), yFor(l.result), 3, 0, 2 * Math.PI); ctx.fill();
-  });
-
-  if (fit) {
-    // fitted curve
-    const pts = a.session.curve(fit, xmin, xmax, 100);
-    ctx.strokeStyle = "#0f172a"; ctx.lineWidth = 2;
-    ctx.beginPath();
-    pts.forEach((p, i) => { const x = xFor(p.x), y = yFor(p.y); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
-    ctx.stroke();
-    // SRT marker at 50%
-    ctx.strokeStyle = "#16a34a"; ctx.setLineDash([4, 3]);
-    ctx.beginPath(); ctx.moveTo(xFor(fit.srt), yFor(0)); ctx.lineTo(xFor(fit.srt), yFor(0.5));
-    ctx.lineTo(xmin < fit.srt ? pad : xFor(fit.srt), yFor(0.5)); ctx.stroke(); ctx.setLineDash([]);
-  }
+  if (!cv || !spec) return;
+  drawAdaptiveCombined(cv.getContext("2d"), cv.width, cv.height, spec);
 }
 
 function bindAdaptiveEvents() {
