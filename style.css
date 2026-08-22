@@ -1115,9 +1115,12 @@ details summary {
 }
 .adaptive-list-picker .list-toggle {
   border: 1px solid var(--border, #cbd5e1);
-  background: #fff; border-radius: 6px;
+  background: #fff; color: #94a3b8; border-radius: 6px;
   padding: .35rem .6rem; cursor: pointer; font-size: .9rem;
   position: relative;
+}
+.adaptive-list-picker .list-toggle:hover {
+  color: #475569; border-color: #94a3b8;
 }
 .adaptive-list-picker .list-toggle.selected {
   background: #0f62fe; color: #fff; border-color: #0f62fe;
