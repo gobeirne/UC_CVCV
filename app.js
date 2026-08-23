@@ -693,6 +693,10 @@ function loadDraftIntoForm() {
       if ($("clientDob")) $("clientDob").value = parsed.client.dob || "";
       $("sessionDate").value = parsed.client.date || $("sessionDate").value;
       $("sessionNotes").value = parsed.client.notes || "";
+      // The mita/dialect map travels with the client, so restore it alongside
+      // the client fields — otherwise the notes could show a Mita/dialect line
+      // with no active substitutions behind it.
+      state.dialectSubstitutions = parsed.dialectSubstitutions || {};
       // Clinician/role/facility loaded from clinic settings (device-persistent), not session
     }
   } catch {}
@@ -1077,6 +1081,9 @@ function clearClient() {
   if ($("clientId")) $("clientId").value = "";
   if ($("clientDob")) $("clientDob").value = "";
   state.client = { ...state.client, name: "", id: "", dob: "" };
+  // The mita/dialect substitutions belong to the client, so clear them too.
+  state.dialectSubstitutions = {};
+  applyMitaToNotes();
   saveSession();
   renderRecentSessions();
   updateClearClientBtn();
@@ -3296,6 +3303,7 @@ function advanceTrialNow(trial, q) {
     const cur = state.adaptive.session.current();
     resultPayload.adaptive = true;
     resultPayload.adaptiveProcedure = state.adaptive.procedure;
+    resultPayload.sourceList = (trial.sourceList != null) ? trial.sourceList : null;
     if (cur) { resultPayload.adaptiveTrack = cur.trackId; resultPayload.adaptivePTarget = cur.pTarget; }
   }
 
@@ -4012,14 +4020,30 @@ function buildAdaptiveReportSections() {
       ? `${t.maskerEar}${t.maskerOffsetDb != null ? `, SNR held at ${t.maskerOffsetDb.toFixed(1)} dB` : ""}`
       : "none";
     const srt = t.srt != null ? `${t.srt.toFixed(1)} dB(A)` : "not estimated";
-    const slope = t.slope != null ? `${t.slope.toFixed(3)} /dB` : "—";
+    // Report slope as %/dB (percentage-points of intelligibility per dB) rather
+    // than proportion/dB. This is the slope of the fitted 0→1 logistic × 100.
+    const slope = t.slope != null ? `${(t.slope * 100).toFixed(1)} %/dB` : "—";
     const slopeNote = t.procedure === "A1"
       ? ` <span class="report-pi-legend">(A1 concentrates trials near 50%; the slope is weakly determined — report the SRT)</span>`
       : "";
     const when = t.timestamp ? new Date(t.timestamp).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "short" }) : "";
-    const rows = (t.log || []).map(l =>
-      `<tr><td>${l.order}</td><td>${l.trackId}${l.pTarget != null ? ` (${Math.round(l.pTarget*100)}%)` : ""}</td><td>${l.level.toFixed(1)}</td><td>${l.correct}/${l.phonemes}</td><td>${(l.result*100).toFixed(0)}%</td><td>${l.reversal ? "✓" : ""}</td><td>${l.doubled ? "×2" : ""}</td></tr>`
-    ).join("");
+    const esc = s => (s == null ? "" : String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"));
+
+    let tableHead, rows;
+    if (t.procedure === "A1") {
+      // A1: one track, no reversal/step emphasis. Show the word, its source
+      // list, and any clinician transcription instead.
+      tableHead = `<tr><th>#</th><th>Word</th><th>List</th><th>Level dB(A)</th><th>Correct</th><th>%</th><th>Transcription</th></tr>`;
+      rows = (t.log || []).map(l =>
+        `<tr><td>${l.order}</td><td>${esc(l.word)}</td><td>${l.sourceList != null ? esc(l.sourceList) : "—"}</td><td>${l.level.toFixed(1)}</td><td>${l.correct}/${l.phonemes}</td><td>${(l.result * 100).toFixed(0)}%</td><td>${esc(l.transcription) || "—"}</td></tr>`
+      ).join("");
+    } else {
+      // A2: two interleaved tracks — the track identity matters here.
+      tableHead = `<tr><th>#</th><th>Track</th><th>Word</th><th>List</th><th>Level dB(A)</th><th>Correct</th><th>%</th><th>Transcription</th></tr>`;
+      rows = (t.log || []).map(l =>
+        `<tr><td>${l.order}</td><td>${l.trackId}${l.pTarget != null ? ` (${Math.round(l.pTarget * 100)}%)` : ""}</td><td>${esc(l.word)}</td><td>${l.sourceList != null ? esc(l.sourceList) : "—"}</td><td>${l.level.toFixed(1)}</td><td>${l.correct}/${l.phonemes}</td><td>${(l.result * 100).toFixed(0)}%</td><td>${esc(l.transcription) || "—"}</td></tr>`
+      ).join("");
+    }
     return `
       <section class="report-lang-section">
         <h2>${L.label} — adaptive ${t.procedure} (track ${i + 1})</h2>
@@ -4039,7 +4063,7 @@ function buildAdaptiveReportSections() {
         ${img ? `<img class="report-pi" src="${img}" alt="${t.procedure} psychometric function and adaptive track">` : ""}
         <p class="report-pi-legend">Top: fitted psychometric function with per-word markers; the dashed line marks 50% and drops to the SRT. Bottom: the adaptive track on the same dB(A) scale. Marker colour runs red (0 phonemes correct) → green (all ${t.phonemeCount || (L.phonemeCount)} correct).</p>
         <h3>Adaptive track data</h3>
-        <table class="report-table"><thead><tr><th>#</th><th>Track</th><th>Level dB(A)</th><th>Correct</th><th>%</th><th>Reversal</th><th>Step×2</th></tr></thead><tbody>${rows}</tbody></table>
+        <table class="report-table"><thead>${tableHead}</thead><tbody>${rows}</tbody></table>
       </section>`;
   });
   return blocks.join("");
@@ -4216,7 +4240,7 @@ function bkFromForm() {
   };
 }
 function floorFromForm() {
-  const v = Number($("bkFloor") ? $("bkFloor").value : 0.05);
+  const v = Number($("bkFloor") ? $("bkFloor").value : 0);
   return Math.min(0.5, Math.max(0, isFinite(v) ? v : 0.05));
 }
 function pTargetsFromForm(proc) {
@@ -4260,6 +4284,16 @@ function selectedAdaptiveWords() {
   return pool;
 }
 
+// Same pool, but each entry paired with the list number it came from, so the
+// adaptive trial data can report the source list of every presented word.
+function selectedAdaptiveWordsWithList() {
+  const selected = state.adaptiveForm.selectedLists || [];
+  const lists = currentWordLists();
+  const pool = [];
+  selected.forEach(n => { if (lists[n]) lists[n].forEach(w => pool.push({ word: w, list: n })); });
+  return pool;
+}
+
 function updateAdaptiveListStatus() {
   const el = $("adaptiveListStatus");
   if (!el) return;
@@ -4288,14 +4322,17 @@ function startAdaptiveTrack() {
     return;
   }
 
-  // Assemble the word pool from the selected lists, in the chosen order.
-  let pool = selectedAdaptiveWords();
+  // Assemble the word pool from the selected lists, in the chosen order,
+  // keeping each word paired with the list it came from.
+  let pool = selectedAdaptiveWordsWithList();
   if (!pool.length) { alert("Select at least one word list for the adaptive track."); return; }
   // Optionally shuffle within the pool per the language's randomise setting.
   if (randomiseEnabled(state.language)) pool = shuffle(pool);
   // Repeat the pool if it is shorter than the trial count.
   const words = [];
-  for (let i = 0; i < nTrials; i++) words.push(pool[i % pool.length]);
+  for (let i = 0; i < nTrials; i++) words.push(pool[i % pool.length].word);
+  const wordLists = [];
+  for (let i = 0; i < nTrials; i++) wordLists.push(pool[i % pool.length].list);
 
   const session = new Adaptive.AdaptiveSession({
     procedure: proc,
@@ -4317,6 +4354,7 @@ function startAdaptiveTrack() {
     procedure: proc,
     listNumbers: (state.adaptiveForm.selectedLists || []).slice(),
     words,
+    wordLists,
     maskerOffsetDb: maskerOffset,
     startLevel,
     railHandled: false
@@ -4333,7 +4371,7 @@ function startAdaptiveTrack() {
   };
   state.queue = [synthetic];
   state.currentListIndex = 0;
-  state.currentTrials = words.map((w, i) => ({ order: i + 1, word: w }));
+  state.currentTrials = words.map((w, i) => ({ order: i + 1, word: w, sourceList: wordLists[i] }));
   state.currentResultIndexByTrial = {};
   state.currentTrialIndex = 0;
   state.firstTrialMaskerPrimed = false;
@@ -4361,6 +4399,17 @@ function applyAdaptiveMaskerLevel() {
   if (state.audio.masker) state.audio.masker.gain.gain.value = gainForLevel(target);
 }
 
+// Build a readable transcription of what the clinician entered for a word.
+// Advanced scoring records the actual response phoneme per slot (or null for
+// "not transcribed / omitted"); fast scoring records only a count, so there is
+// no transcription to show. Returns "" when nothing was transcribed.
+function adaptiveTranscriptionString(r) {
+  if (r.scoringMode === "fast") return "";
+  const resp = r.responsePhonemes;
+  if (!Array.isArray(resp) || !resp.some(p => p !== null && p !== undefined && p !== "")) return "";
+  return resp.map(p => (p === null || p === undefined || p === "") ? "·" : p).join(" ");
+}
+
 // ── The adaptive step, called from advanceTrialNow after a result is stored ──
 // resultPayload is the object just pushed to state.results.
 function adaptiveOnResult(resultPayload) {
@@ -4369,6 +4418,18 @@ function adaptiveOnResult(resultPayload) {
   const outcomes = phonemeOutcomeVector(resultPayload);
   const presentedLevel = resultPayload.listLevelDbA;
   const out = a.session.record(outcomes, presentedLevel);
+
+  // Enrich the just-recorded log entry with the word, its source list, and the
+  // clinician's phoneme transcription (advanced scoring only), so the report
+  // and the exported data are complete. The engine stays domain-agnostic; this
+  // metadata is attached here where the word/list/transcription are known.
+  const entry = a.session.log[a.session.log.length - 1];
+  if (entry) {
+    entry.word = resultPayload.presentedWord;
+    entry.sourceList = (resultPayload.sourceList != null) ? resultPayload.sourceList : null;
+    entry.targetPhonemes = resultPayload.targetPhonemes || [];
+    entry.transcription = adaptiveTranscriptionString(resultPayload);
+  }
   renderAdaptiveViews();
 
   if (a.session.finished) { finishAdaptiveTrack(); return; }
@@ -4504,7 +4565,7 @@ function showAdaptiveSummary(fit) {
   let html = `<p><b>${a.procedure}</b> · ${a.session.total} trials · ${reversals}.</p>`;
   if (fit) {
     html += `<p style="font-size:1.15rem"><b>SRT (50%): ${fit.srt.toFixed(1)} dB(A)</b></p>`;
-    html += `<p>Fitted slope: ${fit.slope.toFixed(3)} /dB` +
+    html += `<p>Fitted slope: ${(fit.slope * 100).toFixed(1)} %/dB` +
             `${a.procedure === "A1" ? " <span class=\"hint\">(A1 concentrates trials near 50%, so the slope is weakly determined — report the SRT)</span>" : ""}</p>`;
     if (!fit.converged) html += `<p class="danger-text">Note: the fit did not fully converge; interpret with caution.</p>`;
   } else {
@@ -4589,7 +4650,7 @@ function renderAdaptiveEstimate() {
     if (fit) {
       numbers.innerHTML =
         `<div><span class="big-srt">${fit.srt.toFixed(1)} dB(A)</span> SRT (50%)</div>` +
-        `<div>slope ${fit.slope.toFixed(3)} /dB · ${fit.n} phoneme observations` +
+        `<div>slope ${(fit.slope * 100).toFixed(1)} %/dB · ${fit.n} phoneme observations` +
         `${fit.converged ? "" : " · <span class=\"danger-text\">not converged</span>"}</div>`;
     } else {
       numbers.textContent = "Collecting data… the estimate appears once enough words are scored.";

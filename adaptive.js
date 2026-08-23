@@ -45,10 +45,14 @@
     s50: 0.1         // assumed tracking slope (proportion/dB) in the step rule
   };
 
-  // Per-phoneme lower asymptote for open-set word scoring. Small but > 0
-  // (a phoneme can be guessed from structured confusions). Matches the
-  // demo's default open-set PerUnitFloor.
-  const DEFAULT_PER_UNIT_FLOOR = 0.05;
+  // Per-phoneme lower asymptote. For an OPEN-SET, phoneme-scored speech test
+  // there is no forced-choice guessing rate: a phoneme either matches the
+  // target or it does not, so the correct lower asymptote is 0 and the fitted
+  // 50% point is a genuine SRT50 (and the fitted slope a genuine s50). The
+  // Brand & Kollmeier discrimination function is the ordinary 0→1 logistic.
+  // (A non-zero floor is only appropriate for a closed-set task with a known
+  // number of alternatives; it remains configurable for that case.)
+  const DEFAULT_PER_UNIT_FLOOR = 0;
 
   // The demo's intelligibility() uses a large A to make a clean 0→1
   // per-unit curve; the floor is then applied on top. Baked in here.
@@ -88,6 +92,7 @@
       this.reversals = 0;
       this.iteration = 0;                      // trials completed on this track
       this.prevDeltaL = 0;
+      this.lastNonzeroDeltaL = null;           // direction of the last real move
       this.trials = [];                        // {level, result} per word
     }
 
@@ -106,16 +111,20 @@
       const phi = bk.a * Math.pow(bk.b, -1 * this.reversals);
       let deltaL = (phi * (result - this.pTarget)) / bk.s50;
 
-      // Minimum-step floor on |ΔL|.
-      if (Math.abs(deltaL) < bk.minStep) {
-        deltaL = Math.sign(deltaL || 1) * bk.minStep;
+      // Minimum-step floor on |ΔL| — but ONLY for genuine (non-zero) steps.
+      // When result === pTarget the Brand & Kollmeier update is exactly zero:
+      // the listener is at target, so the level must not move. Forcing a
+      // Math.sign(0)-based step here would push the level (the production bug
+      // that made 2/4 at a 50% target step quieter). A zero step stays put.
+      if (deltaL !== 0 && Math.abs(deltaL) < bk.minStep) {
+        deltaL = Math.sign(deltaL) * bk.minStep;
       }
 
       // A2 step-doubling (Brand & Kollmeier rule 4): only when the target
       // itself is an extreme (≤20% or ≥80%), the response is past that
       // extreme, and the speed factor is large.
       let doubled = false;
-      if (this.doubleStep) {
+      if (this.doubleStep && deltaL !== 0) {
         const rule1 = (this.pTarget <= 0.2) || (this.pTarget >= 0.8);
         const rule2 = (result < 0.2 && this.pTarget <= 0.2) ||
                       (result > 0.8 && this.pTarget >= 0.8);
@@ -128,12 +137,20 @@
       let next = presentedLevel - deltaL;
       next = Math.round(next * 100) / 100;   // 0.01 dB bookkeeping precision
 
-      // Reversal = sign change in ΔL (ignoring the first trial).
+      // Reversal = a change in the direction of movement. A zero step is not
+      // a movement, so it is never a reversal, and it does not overwrite the
+      // remembered direction: reversals are judged against the last NON-ZERO
+      // step. (Both are corrections to the demo's edge-case, which counted a
+      // zero as a reversal and then let it poison the next comparison.)
       let reversal = false;
-      if (this.iteration >= 2 &&
-          !((this.prevDeltaL > 0 && deltaL > 0) || (this.prevDeltaL < 0 && deltaL < 0))) {
-        this.reversals += 1;
-        reversal = true;
+      if (deltaL !== 0) {
+        if (this.lastNonzeroDeltaL != null &&
+            !((this.lastNonzeroDeltaL > 0 && deltaL > 0) ||
+              (this.lastNonzeroDeltaL < 0 && deltaL < 0))) {
+          this.reversals += 1;
+          reversal = true;
+        }
+        this.lastNonzeroDeltaL = deltaL;
       }
       this.prevDeltaL = deltaL;
       this.level = next;
