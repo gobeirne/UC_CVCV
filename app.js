@@ -1526,15 +1526,26 @@ function bindEvents() {
 
   // Calibration
   $("calibrateBtn").onclick = openCalibrationDialog;
-  if ($("calMethodSelect")) $("calMethodSelect").onchange = renderCalMethodUI;
+  if ($("calMethodSelect")) $("calMethodSelect").onchange = () => {
+    // Switching method changes which signal calibration uses (tone vs noise), so
+    // stop anything playing and relabel — otherwise the button could claim to be
+    // playing a tone while noise is still running from the previous method.
+    stopCalibrationSound();
+    if ($("calPlayBtn")) {
+      $("calPlayBtn").textContent = calPlayLabel(false);
+      $("calPlayBtn").classList.remove("active");
+    }
+    $("calDialogStatus").textContent = "";
+    renderCalMethodUI();
+  };
   if ($("calPlayBtn")) $("calPlayBtn").onclick = toggleCalibrationNoise;
   if ($("calEarSelect")) $("calEarSelect").onchange = (e) => setCalibrationEar(e.target.value);
   if ($("calSaveBtn")) $("calSaveBtn").onclick = saveCalibrationDialog;
-  // Catches Cancel, Esc and Save alike — the noise must never outlive the dialog.
+  // Catches Cancel, Esc and Save alike — the signal must never outlive the dialog.
   if ($("calibrationDialog")) $("calibrationDialog").addEventListener("close", () => {
     stopCalibrationSound();
     if ($("calPlayBtn")) {
-      $("calPlayBtn").textContent = "▶ Play calibration noise";
+      $("calPlayBtn").textContent = calPlayLabel(false);
       $("calPlayBtn").classList.remove("active");
     }
   });
@@ -2324,6 +2335,17 @@ function offerStoredCalibration() {
   } catch {}
 }
 
+// Log the actual sample rate of each decoded file, so a file whose rate differs
+// from the rest is visible instead of assumed. decodeAudioData reports the rate
+// it read from the file header; an AudioBufferSourceNode is resampled to the
+// context rate by the Web Audio engine on playback, so a differing rate is
+// handled correctly rather than shifting pitch.
+function logDecodedRate(url, buffer) {
+  try {
+    console.log(`[audio] decoded ${url}: ${buffer.sampleRate} Hz`);
+  } catch {}
+}
+
 // Resolve the first base that actually exists to its concrete URL, without
 // decoding. Used so the calibration path can learn WHICH file it will play and
 // apply that file's folder gain adjustment (the CVC tone lives in sounds_cvc/
@@ -2358,6 +2380,7 @@ async function decodeFirstAvailable(bases) {
         if (!resp.ok) continue;
         const arr = await resp.arrayBuffer();
         const decoded = await ctx.decodeAudioData(arr);
+        logDecodedRate(url, decoded);
         state.audio.decodedBuffers[url] = decoded;
         return decoded;
       } catch {}
@@ -2368,11 +2391,30 @@ async function decodeFirstAvailable(bases) {
 
 // Decode the first available base AND report the URL it came from, so callers
 // can apply that file's folder gain adjustment. { buffer, url }.
+//
+// This does NOT pre-probe with HEAD: some static hosts (GitHub Pages behind a
+// CDN among them) answer HEAD with 405/redirect even when GET works, which would
+// make a reachable calibration tone look missing and silently fall through to
+// the noise. We attempt the real decode (a GET) on each candidate in turn and
+// only move on when that genuinely fails.
 async function decodeFirstAvailableWithUrl(bases) {
-  const url = await firstAvailableUrl(bases);
-  if (!url) throw new Error("No decodable calibration sound found");
-  const buffer = await decodeFirstAvailable([url]);
-  return { buffer, url };
+  const ctx = ensureAudio();
+  for (const base of bases) {
+    const urls = base.includes("/") ? [base] : candidatesForBase(base);
+    for (const url of urls) {
+      if (state.audio.decodedBuffers[url]) return { buffer: state.audio.decodedBuffers[url], url };
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) continue;
+        const arr = await resp.arrayBuffer();
+        const decoded = await ctx.decodeAudioData(arr);
+        logDecodedRate(url, decoded);
+        state.audio.decodedBuffers[url] = decoded;
+        return { buffer: decoded, url };
+      } catch {}
+    }
+  }
+  throw new Error("No decodable calibration sound found");
 }
 
 function stopCalibrationSound() {
@@ -2389,6 +2431,7 @@ function openCalibrationDialog() {
   $("calMethodSelect").value = calMethod();
   $("calLevelInput").value = state.calibration.measuredDbA ?? "";
   $("calDialogStatus").textContent = "";
+  if ($("calPlayBtn")) $("calPlayBtn").textContent = calPlayLabel(false);
   renderCalMethodUI();
   dlg.showModal();
 }
@@ -2441,18 +2484,38 @@ function calibrationSignalBases() {
   const toneCVCV = "sounds/calibration_CVCV_1kHz.mp3";
   const toneCVC  = `${ENGLISH_SOUND_DIR}/` +
     encodeURI("Speech Lists - Millenium Edition-01-1 kHz tone_left.mp3");
-  if (calMethod() === "audiometer") {
+  // Follow the LIVE method selector in the dialog, not the saved calibration
+  // method: the clinician chooses the method and plays the signal to calibrate
+  // BEFORE saving, so reading saved state here would play the wrong signal (e.g.
+  // the noise) until Save. Fall back to the saved method when the dialog isn't
+  // open (e.g. Test level from the setup screen).
+  const method = ($("calMethodSelect") && $("calMethodSelect").value) || calMethod();
+  if (method === "audiometer") {
+    // Audiometer method calibrates against the 1 kHz tone. Do NOT fall back to
+    // the broadband noise: substituting noise for the tone would let a clinician
+    // calibrate against the wrong signal without realising. If the tone file is
+    // missing we want a clear failure, not silent noise.
     const tone = state.language === "english" ? toneCVC : toneCVCV;
-    return [tone, "calib", "noise", "masking"];
+    return [tone];
   }
   return ["calib", "noise", "masking"];
+}
+
+// True when the current (live) calibration method uses the 1 kHz tone.
+function calSignalIsTone() {
+  const method = ($("calMethodSelect") && $("calMethodSelect").value) || calMethod();
+  return method === "audiometer";
+}
+function calPlayLabel(playing) {
+  const sig = calSignalIsTone() ? "1 kHz tone" : "calibration noise";
+  return `${playing ? "■ Stop" : "▶ Play"} ${sig}`;
 }
 
 async function toggleCalibrationNoise() {
   const btn = $("calPlayBtn");
   if (state.audio.calNode) {
     stopCalibrationSound();
-    btn.textContent = "▶ Play calibration noise";
+    btn.textContent = calPlayLabel(false);
     btn.classList.remove("active");
     $("calDialogStatus").textContent = "";
     return;
@@ -2465,12 +2528,18 @@ async function toggleCalibrationNoise() {
   // silently wrong reference. Refuse and say why.
   if (state.audio.rateMismatch) { renderRateWarning(); return; }
 
+  const isTone = calSignalIsTone();
   let buffer, calUrl;
   try {
     ({ buffer, url: calUrl } = await decodeFirstAvailableWithUrl(calibrationSignalBases()));
   } catch {
-    $("calDialogStatus").textContent =
-      "No calibration sound found. Add calib.wav to the sounds/ folder.";
+    $("calDialogStatus").textContent = isTone
+      ? "1 kHz calibration tone not found. Expected " +
+        (state.language === "english"
+          ? `${ENGLISH_SOUND_DIR}/Speech Lists - Millenium Edition-01-1 kHz tone_left.mp3`
+          : "sounds/calibration_CVCV_1kHz.mp3") +
+        ". Calibration cannot proceed without it."
+      : "No calibration noise found. Add calib.wav or noise.mp3 to the sounds/ folder.";
     return;
   }
 
@@ -2497,7 +2566,7 @@ async function toggleCalibrationNoise() {
   source.start();
   state.audio.calNode = source;
 
-  btn.textContent = "■ Stop calibration noise";
+  btn.textContent = calPlayLabel(true);
   btn.classList.add("active");
   $("calDialogStatus").textContent = calNoiseStatusText(ear);
 }
@@ -2513,8 +2582,11 @@ function calNoiseStatusText(ear) {
   const where = ear === "left" ? "left channel only"
               : ear === "right" ? "right channel only"
               : "both channels";
-  const signal = calMethod() === "audiometer" ? "1 kHz calibration tone" : "Calibration noise";
-  return `${signal} playing at full output — ${where}.`;
+  const signal = calSignalIsTone() ? "1 kHz calibration tone" : "Calibration noise";
+  const adj = calSignalIsTone() && state.language === "english" && fileGainAdjustDb(
+    `${ENGLISH_SOUND_DIR}/x`) !== 0
+      ? ` (CVC tone, ${cvcFileGainDb()} dB folder adjustment applied)` : "";
+  return `${signal} playing at full output${adj} — ${where}.`;
 }
 
 function saveCalibrationDialog() {
