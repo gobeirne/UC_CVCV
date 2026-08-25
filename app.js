@@ -165,6 +165,41 @@ const LANGUAGES = {
 };
 
 function lang() { return LANGUAGES[state.language] || LANGUAGES.maori; }
+
+/* ── CVC file gain adjustment ─────────────────────────────────────────────
+   Every sound played from the sounds_cvc/ folder is attenuated by this many dB.
+   The CVC recordings (words AND their 1 kHz calibration tone) are 5.07 dB
+   hotter in absolute level than the corresponding CVCV material, so pulling the
+   whole folder down by 5.07 dB puts both word sets on the same effective level
+   scale while each keeps the same relationship to its own 1 kHz tone.
+
+   Because the CVC calibration tone lives in sounds_cvc/ too, it receives the
+   SAME adjustment as the CVC words. That is the point: after the adjustment the
+   CVC tone and the CVCV tone give the SAME audiometer VU reading at one dial
+   setting, which is the proof that the two sets are level-matched.
+
+   This is a single figure that a clinician can change from Settings (with a
+   confirmation), NOT a per-language constant — the rule is purely "which folder
+   did this file come from". Applies to words and the CVC tone; the masker and
+   the CVCV assets are in other folders and are untouched. */
+const CVC_SOUND_DIR = "sounds_cvc";
+const DEFAULT_CVC_FILE_GAIN_DB = -5.07;
+
+// The active adjustment: the persisted setting if present, else the default.
+// Stored as a signed dB figure (negative = attenuation), matching the UI label.
+function cvcFileGainDb() {
+  const v = Number(state.cvcFileGainDb);
+  return Number.isFinite(v) ? v : DEFAULT_CVC_FILE_GAIN_DB;
+}
+
+// Extra gain adjustment (dB, signed) for a given file URL, by folder. Any asset
+// under sounds_cvc/ gets the CVC adjustment; everything else gets 0. This is the
+// single source of truth for the offset, so the play path, the decode path and
+// the calibration path all agree without threading a per-call flag.
+function fileGainAdjustDb(url) {
+  if (typeof url !== "string") return 0;
+  return url.includes(`${CVC_SOUND_DIR}/`) ? cvcFileGainDb() : 0;
+}
 function WORD_LISTS_FOR(langKey) { return (LANGUAGES[langKey] || LANGUAGES.maori).lists; }
 function currentWordLists() { return lang().lists; }
 function phonemeCount() { return lang().phonemeCount; }
@@ -183,6 +218,7 @@ function randomiseEnabled(langKey = state.language) {
 }
 
 const KNOWN_SOUND_FILES = [
+  "calibration_CVCV_1kHz.mp3",
   "hapū.mp3","hāte.mp3","hēki.mp3","heru.mp3","hine.mp3","hinu.mp3","hipi.mp3","honu.mp3",
   "hope.mp3","huri.mp3","kaha.mp3","kare.mp3","keke.mp3","kēmu.mp3","kīngi.mp3","kino.mp3",
   "koha.mp3","kohu.mp3","kōrero_mai_01.mp3","kōrero_mai_02.mp3","kōrero_mai_03.mp3","kōrero_mai_04.mp3","kōrero_mai_05.mp3","kōrero_mai_06.mp3",
@@ -209,6 +245,10 @@ const state = {
   language: "maori",
   client: {},
   calibration: { method: null, measuredDbA: null, timestamp: null, isCalibrated: false, sliderMinDb: -100, sliderMaxDb: 0, currentSliderDb: 0, strandedLists: 0 },
+  // Gain adjustment (signed dB) applied to every file played from sounds_cvc/.
+  // Default -5.07 dB matches the CVC recordings being that much hotter than the
+  // CVCV set; changing it is a deliberate, confirmed action (see the setting).
+  cvcFileGainDb: DEFAULT_CVC_FILE_GAIN_DB,
   preload: null,
   queue: [],
   currentListIndex: -1,
@@ -280,9 +320,10 @@ const CAL_METHODS = {
     levelStep: 5,
     steps: [
       "Set the device volume to maximum and leave it there for the whole session.",
-      "Play the calibration noise and adjust the audiometer's aux input gain until its VU meter reads 0.",
+      "Play the 1 kHz calibration tone and adjust the audiometer's aux input gain until its VU meter reads 0.",
       "Set the audiometer dial to the highest level you expect to present, plus a margin. Use at least 6 dB of margin if you will be masking.",
-      "Stop the noise and enter that dial setting below."
+      "Stop the tone and enter that dial setting below.",
+      "One calibration serves both word sets: the CVC and CVCV tones share the same tone-to-speech relationship, and the app attenuates the CVC words by 5.07 dB so both sit on the same effective level scale."
     ]
   },
   soundfield: {
@@ -471,6 +512,7 @@ function init() {
   $("sessionDate").value = new Date().toISOString().slice(0,10);
   repopulateListSelects();
   loadClinicSettings();
+  loadCvcGainSetting();
   loadDraftIntoForm();
   bindEvents();
   applyLanguageToUI();
@@ -515,6 +557,103 @@ function saveClinicSettings() {
     logo: state.clinicLogo || null
   };
   localStorage.setItem("ucCVCVClinic", JSON.stringify(data));
+}
+
+// ── CVC file gain adjustment (device-persistent) ──
+// Applied to every file in sounds_cvc/. Default -5.07 dB. Persisted separately
+// so it survives sessions and reloads, like calibration and clinic settings.
+const CVC_GAIN_STORAGE_KEY = "ucCVCVFileGainDb";
+
+function loadCvcGainSetting() {
+  try {
+    const raw = localStorage.getItem(CVC_GAIN_STORAGE_KEY);
+    if (raw !== null) {
+      const v = Number(JSON.parse(raw));
+      state.cvcFileGainDb = Number.isFinite(v) ? v : cvcConfigDefault();
+    } else {
+      state.cvcFileGainDb = cvcConfigDefault();
+    }
+  } catch {
+    state.cvcFileGainDb = cvcConfigDefault();
+  }
+  renderCvcGainSetting();
+}
+
+// Install-time default: config.js may set window.APP_CONFIG.levels.cvcFileGainDb
+// (signed dB) to change the shipped default without editing app.js. Falls back
+// to the built-in -5.07. A persisted user setting still overrides this.
+function cvcConfigDefault() {
+  const v = Number(window.APP_CONFIG?.levels?.cvcFileGainDb);
+  return Number.isFinite(v) ? v : DEFAULT_CVC_FILE_GAIN_DB;
+}
+
+function saveCvcGainSetting() {
+  localStorage.setItem(CVC_GAIN_STORAGE_KEY, JSON.stringify(cvcFileGainDb()));
+}
+
+// Reflect the current value into the settings UI (input + status), if present.
+function renderCvcGainSetting() {
+  const input = $("cvcGainInput");
+  if (input) input.value = cvcFileGainDb();
+  const status = $("cvcGainStatus");
+  if (status) {
+    const v = cvcFileGainDb();
+    const isDefault = Math.abs(v - DEFAULT_CVC_FILE_GAIN_DB) < 1e-9;
+    status.textContent = isDefault
+      ? `Default (${DEFAULT_CVC_FILE_GAIN_DB} dB). Applies to every sound in the ${CVC_SOUND_DIR}/ folder.`
+      : `Custom: ${v} dB (default is ${DEFAULT_CVC_FILE_GAIN_DB} dB). Applies to every sound in the ${CVC_SOUND_DIR}/ folder.`;
+  }
+}
+
+// Change the setting, but only behind a thorough confirmation — this figure is
+// the level relationship between the two word sets, and getting it wrong makes
+// every CVC result off by the error. Returns true if applied.
+function requestCvcGainChange(nextValueRaw) {
+  const next = Number(nextValueRaw);
+  if (!Number.isFinite(next)) {
+    renderCvcGainSetting();   // reject: restore displayed value
+    return false;
+  }
+  const current = cvcFileGainDb();
+  if (Math.abs(next - current) < 1e-9) return false;   // no change
+
+  const warning =
+    "Change the CVC file gain adjustment?\n\n" +
+    `This changes the level of EVERY sound played from the ${CVC_SOUND_DIR}/ folder ` +
+    "— the CVC words AND the CVC 1 kHz calibration tone — by the amount you enter.\n\n" +
+    `Current: ${current} dB\nNew: ${next} dB\n\n` +
+    `The default of ${DEFAULT_CVC_FILE_GAIN_DB} dB is what puts the CVC word set on the ` +
+    "same effective level scale as the te reo CVCV set under one audiometer calibration. " +
+    "It reflects the CVC recordings being 5.07 dB hotter than the CVCV recordings.\n\n" +
+    "Only change this if you have re-measured the two word sets and know the new " +
+    "relationship. An incorrect value will make every CVC presentation the wrong " +
+    "level, and you will need to RE-CALIBRATE afterwards.\n\n" +
+    "Are you sure you want to change it?";
+
+  if (!window.confirm(warning)) {
+    renderCvcGainSetting();   // cancelled: restore displayed value
+    return false;
+  }
+
+  state.cvcFileGainDb = next;
+  saveCvcGainSetting();
+  renderCvcGainSetting();
+
+  // The reference the clinician metered was on the OLD adjustment, so it no
+  // longer describes what the CVC files present at. Make that impossible to miss.
+  if (state.calibration.isCalibrated) {
+    const note = $("cvcGainStatus");
+    if (note) {
+      note.textContent =
+        `Saved: ${next} dB. Re-run calibration — the stored calibration was measured ` +
+        `with the previous adjustment and no longer matches the ${CVC_SOUND_DIR}/ files.`;
+    }
+  }
+  return true;
+}
+
+function resetCvcGainSetting() {
+  return requestCvcGainChange(DEFAULT_CVC_FILE_GAIN_DB);
 }
 
 function renderLogoPreview(dataUrl) {
@@ -815,7 +954,10 @@ function flashNextLocked() {
    response; the trainee scores it and gets immediate feedback. */
 
 const TRAINING_DIR = "training";
-const ENGLISH_SOUND_DIR = "sounds_cvc";
+// The CVC recordings live here. Defined once at the top as CVC_SOUND_DIR (the
+// folder that receives the CVC gain adjustment); this alias keeps the existing
+// English-mode references reading naturally.
+const ENGLISH_SOUND_DIR = CVC_SOUND_DIR;
 
 // Literal on-disk CVC filenames, warmed when English mode is selected (see
 // the preloading section). Cross-checked against the English lexicon stems.
@@ -1397,6 +1539,11 @@ function bindEvents() {
     }
   });
   $("testCalBtn").onclick = testCalibratedSound;
+  // CVC file gain adjustment (guarded by a confirmation inside the handler).
+  if ($("cvcGainApplyBtn")) $("cvcGainApplyBtn").onclick = () => {
+    requestCvcGainChange($("cvcGainInput") ? $("cvcGainInput").value : DEFAULT_CVC_FILE_GAIN_DB);
+  };
+  if ($("cvcGainResetBtn")) $("cvcGainResetBtn").onclick = resetCvcGainSetting;
   if ($("preloadAllBtn")) $("preloadAllBtn").onclick = preloadEverything;
   $("outputLevel").addEventListener("input", updateOutputLevelFromSlider);
   $("outputLevel").addEventListener("change", updateOutputLevelFromSlider);
@@ -1934,7 +2081,11 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
   el.preload = "auto";
   const source = ctx.createMediaElementSource(el);
   const gain = ctx.createGain();
-  gain.gain.value = gainForLevel(levelDbA);
+  // The folder the file came from decides its gain adjustment: sounds_cvc/
+  // assets are pulled down by the CVC file gain adjustment, everything else
+  // by 0. Derived from the URL so words, carriers and the CVC tone are all
+  // handled by the same rule with nothing to pass in per call.
+  gain.gain.value = gainForLevel(levelDbA, fileGainAdjustDb(url));
 
   // Ear routing via a splitter/merger instead of StereoPannerNode.
   // StereoPannerNode uses an equal-power law that, for a STEREO source panned
@@ -1967,15 +2118,26 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
   return node;
 }
 
-function gainForLevel(levelDbA) {
+// adjustDb is a SIGNED gain adjustment (dB) applied on top of the level→gain
+// conversion, matching the UI's "CVC file gain adjustment: -5.07 dB". Negative
+// attenuates, positive would amplify. It defaults to 0, so the masker, the
+// CVCV assets and any non-sounds_cvc/ file are unchanged. Files under
+// sounds_cvc/ pass -5.07 (via fileGainAdjustDb), so both the CVC words and the
+// CVC calibration tone play 5.07 dB below their raw level — landing them on the
+// same effective scale as CVCV and making the two tones meter identically.
+function gainForLevel(levelDbA, adjustDb = 0) {
+  const adj = Number(adjustDb) || 0;
   if (state.calibration.isCalibrated && state.calibration.measuredDbA !== null) {
-    const attenuation = Number(state.calibration.measuredDbA) - Number(levelDbA);
+    // Effective presented level is the displayed level plus the (signed) file
+    // adjustment; attenuation is how far that sits below the unity reference.
+    const attenuation = Number(state.calibration.measuredDbA) - (Number(levelDbA) + adj);
     const gain = Math.pow(10, -attenuation / 20);
     if (gain > 1) {
       // The reference IS unity gain. Amplifying past it clips the sample and
       // the on-screen dB(A) stops describing what the client hears. Cap, and
       // complain — if this fires, a level reached the audio path without
-      // passing clampLevel().
+      // passing clampLevel(). A negative (attenuating) CVC adjustment can only
+      // lower the gain, so it is never the cause; the base level is too high.
       console.error(
         `gainForLevel: ${levelDbA} dB(A) is above the calibration reference of ` +
         `${state.calibration.measuredDbA} dB(A). Capped at unity — presented level ` +
@@ -1991,15 +2153,17 @@ function gainForLevel(levelDbA) {
   // the unity-gain reference and attenuate below it. Without this, every word
   // plays at unity and the level never actually changes in the ear.
   if (adaptiveActive() && state.adaptive && state.adaptive.startLevel != null) {
-    const attenuation = Number(state.adaptive.startLevel) - Number(levelDbA);
+    const attenuation = Number(state.adaptive.startLevel) - (Number(levelDbA) + adj);
     // attenuation < 0 means "above the starting level"; can't amplify past
     // unity, so cap and let the rail/level logic surface it.
     if (attenuation <= 0) return 1;
     return Math.pow(10, -attenuation / 20);
   }
-  // Uncalibrated, fixed mode: all files are already level-normalised relative
-  // to each other, so play everything at unity gain and let device volume
-  // control the output.
+  // Uncalibrated, fixed mode: files are level-normalised relative to each other,
+  // so play at unity and let device volume set the output. A negative CVC
+  // adjustment still applies as a pure relative attenuation so the two sets stay
+  // on the same scale even with no reference; a non-negative adjustment is unity.
+  if (adj < 0) return Math.pow(10, adj / 20);
   return 1.0;
 }
 
@@ -2160,6 +2324,29 @@ function offerStoredCalibration() {
   } catch {}
 }
 
+// Resolve the first base that actually exists to its concrete URL, without
+// decoding. Used so the calibration path can learn WHICH file it will play and
+// apply that file's folder gain adjustment (the CVC tone lives in sounds_cvc/
+// and must be pulled down like the CVC words). Returns null if none exist.
+async function firstAvailableUrl(bases) {
+  for (const base of bases) {
+    const urls = base.includes("/") ? [base] : candidatesForBase(base);
+    for (const url of urls) {
+      if (state.audio.decodedBuffers[url]) return url;   // already fetched
+      try {
+        const resp = await fetch(url, { method: "HEAD" });
+        if (resp.ok) return url;
+      } catch {
+        try {
+          const resp = await fetch(url, { headers: { Range: "bytes=0-0" } });
+          if (resp.ok) return url;
+        } catch {}
+      }
+    }
+  }
+  return null;
+}
+
 async function decodeFirstAvailable(bases) {
   const ctx = ensureAudio();
   for (const base of bases) {
@@ -2177,6 +2364,15 @@ async function decodeFirstAvailable(bases) {
     }
   }
   throw new Error("No decodable calibration sound found");
+}
+
+// Decode the first available base AND report the URL it came from, so callers
+// can apply that file's folder gain adjustment. { buffer, url }.
+async function decodeFirstAvailableWithUrl(bases) {
+  const url = await firstAvailableUrl(bases);
+  if (!url) throw new Error("No decodable calibration sound found");
+  const buffer = await decodeFirstAvailable([url]);
+  return { buffer, url };
 }
 
 function stopCalibrationSound() {
@@ -2231,6 +2427,27 @@ function renderCalMethodUI() {
   }
 }
 
+// Ordered list of calibration-signal bases to try, for the current method and
+// language. The audiometer method uses a 1 kHz tone matched to the speech
+// material — CVCV has its own tone, CVC reuses the Millennium-edition 1 kHz
+// tone the CVC recordings were referenced against. The CVC tone lives in
+// sounds_cvc/, so it receives the same folder gain adjustment as the CVC words
+// (see fileGainAdjustDb); that is what makes it meter to the SAME reading as the
+// CVCV tone at one dial setting, so a single calibration serves BOTH tests. The
+// sound-field method keeps the broadband noise. In every case we fall back to
+// noise/masking so a missing tone file degrades gracefully rather than blocking
+// calibration. Paths with spaces are URI-encoded to match the on-disk filenames.
+function calibrationSignalBases() {
+  const toneCVCV = "sounds/calibration_CVCV_1kHz.mp3";
+  const toneCVC  = `${ENGLISH_SOUND_DIR}/` +
+    encodeURI("Speech Lists - Millenium Edition-01-1 kHz tone_left.mp3");
+  if (calMethod() === "audiometer") {
+    const tone = state.language === "english" ? toneCVC : toneCVCV;
+    return [tone, "calib", "noise", "masking"];
+  }
+  return ["calib", "noise", "masking"];
+}
+
 async function toggleCalibrationNoise() {
   const btn = $("calPlayBtn");
   if (state.audio.calNode) {
@@ -2248,9 +2465,9 @@ async function toggleCalibrationNoise() {
   // silently wrong reference. Refuse and say why.
   if (state.audio.rateMismatch) { renderRateWarning(); return; }
 
-  let buffer;
+  let buffer, calUrl;
   try {
-    buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
+    ({ buffer, url: calUrl } = await decodeFirstAvailableWithUrl(calibrationSignalBases()));
   } catch {
     $("calDialogStatus").textContent =
       "No calibration sound found. Add calib.wav to the sounds/ folder.";
@@ -2260,14 +2477,20 @@ async function toggleCalibrationNoise() {
   const source = state.audio.ctx.createBufferSource();
   source.buffer = buffer;
   source.loop = true;
-  // Route through the SAME stereoize/split/merge graph a stimulus uses, at unity.
+  // Route through the SAME stereoize/split/merge graph a stimulus uses.
   // The calibration reference must be measured on the identical signal path the
   // words play through, or any channel-count / up-mix effect would apply to one
   // and not the other and the on-screen dB would drift from the presented dB.
   // Audiometer calibration is done per channel, so honour the ear selector: the
   // clinician sets the aux-input gain for each channel in turn.
+  //
+  // Crucially, the tone gets the SAME folder gain adjustment as the words it is
+  // the reference for: the CVC tone (in sounds_cvc/) plays -5.07 dB, the CVCV
+  // tone (in sounds/) plays at unity. That is what makes the two tones meter to
+  // the SAME reading at one dial setting, and what keeps each word set matched
+  // to its own tone.
   const calGain = state.audio.ctx.createGain();
-  calGain.gain.value = 1;                 // unity: this IS the reference
+  calGain.gain.value = Math.pow(10, fileGainAdjustDb(calUrl) / 20);
   source.connect(calGain);
   const ear = $("calEarSelect") ? $("calEarSelect").value : "binaural";
   state.audio.calRouter = makeEarRouter(state.audio.ctx, calGain, ear);
@@ -2290,7 +2513,8 @@ function calNoiseStatusText(ear) {
   const where = ear === "left" ? "left channel only"
               : ear === "right" ? "right channel only"
               : "both channels";
-  return `Calibration noise playing at full output — ${where}.`;
+  const signal = calMethod() === "audiometer" ? "1 kHz calibration tone" : "Calibration noise";
+  return `${signal} playing at full output — ${where}.`;
 }
 
 function saveCalibrationDialog() {
@@ -2324,9 +2548,9 @@ async function testCalibratedSound() {
   stopCurrentStimulusIfAny();
   stopCalibrationSound();
 
-  let buffer;
+  let buffer, calUrl;
   try {
-    buffer = await decodeFirstAvailable(["calib", "noise", "masking"]);
+    ({ buffer, url: calUrl } = await decodeFirstAvailableWithUrl(calibrationSignalBases()));
   } catch {
     alert("No calibration sound file found.");
     return;
@@ -2336,7 +2560,10 @@ async function testCalibratedSound() {
   const gain = state.audio.ctx.createGain();
   source.buffer = buffer;
   source.loop = true;
-  gain.gain.value = gainForLevel(state.calibration.currentSliderDb);
+  // Play the tone exactly as a word at this level would play, including the
+  // folder gain adjustment, so metering the test tone reads the true presented
+  // level for that word set.
+  gain.gain.value = gainForLevel(state.calibration.currentSliderDb, fileGainAdjustDb(calUrl));
   // Same graph as a real stimulus (and as the calibration noise): source → gain
   // → ear router → destination, binaural. This is what lets a clinician meter
   // the test tone and read the level a word would actually present at.
@@ -2987,6 +3214,9 @@ async function playCurrent(withCarrier) {
   const stimBases = L.hasCarrier ? [word] : englishCandidates(stem);
   const level = q.levelDbA;
   const ear = $("stimEar").value;
+  // No per-call gain adjustment here: the CVC file gain adjustment is applied by
+  // folder inside the play path (any sounds_cvc/ file is pulled down; the te reo
+  // carrier and kupu in sounds/ are not). See fileGainAdjustDb().
 
   // In training mode (Māori only), the client's recorded response follows the kupu.
   const chainResponse = (kupuNode) => {

@@ -168,7 +168,7 @@
                     <input id="bkS50" type="number" step="0.01" value="0.1">
                   </label>
                   <label>Per-phoneme floor
-                    <input id="bkFloor" type="number" step="0.01" min="0" max="0.5" value="0">
+                    <input id="bkFloor" type="number" step="0.01" min="0" max="0.5" value="0.05">
                   </label>
                 </div>
                 <div class="adaptive-target-row" id="a2Targets" hidden>
@@ -285,6 +285,27 @@
                 </div>
               </div>
               <p id="calStatus" class="status" style="margin-top:.5rem"></p>
+
+              <div style="margin-top:.85rem;border-top:1px solid var(--line);padding-top:.65rem">
+                <p class="hint" style="font-size:.82rem;margin:.1rem 0 .45rem">
+                  <strong>CVC file gain adjustment:</strong> applied to every sound played
+                  from the <code>sounds_cvc/</code> folder (the CVC words and the CVC 1&nbsp;kHz
+                  calibration tone). The default of <code>&minus;5.07&nbsp;dB</code> puts the CVC
+                  word set on the same effective level scale as the te reo CVCV set under one
+                  audiometer calibration. Do not change it unless you have re-measured the two
+                  word sets.
+                </p>
+                <label style="display:flex;align-items:center;gap:.5rem;font-size:.85rem">
+                  CVC file gain adjustment
+                  <input id="cvcGainInput" type="number" step="0.01" style="width:6.5rem" value="-5.07">
+                  dB
+                </label>
+                <div class="actions wrap" style="margin-top:.4rem">
+                  <button id="cvcGainApplyBtn" type="button" class="secondary" style="font-size:.8rem;padding:.25rem .6rem">Apply adjustment…</button>
+                  <button id="cvcGainResetBtn" type="button" class="secondary" style="font-size:.8rem;padding:.25rem .6rem">Reset to default</button>
+                </div>
+                <p id="cvcGainStatus" class="hint" style="font-size:.8rem;margin-top:.35rem"></p>
+              </div>
             </div>
 
           </aside>
@@ -712,6 +733,7 @@
     }
   </style>
 
+  <script src="config.js"></script>
   <script src="adaptive.js"></script>
   <script src="app.js"></script>
 </body>

@@ -12,6 +12,25 @@
 
 window.APP_CONFIG = {
 
+  /* Level relationship between the two word sets. Leave this out to use the
+     built-in default. */
+  levels: {
+
+    /* Gain adjustment applied to EVERY sound played from the sounds_cvc/ folder
+       (the NZ English CVC words AND the CVC 1 kHz calibration tone), as a signed
+       dB figure — negative attenuates. The CVC recordings are 5.07 dB hotter in
+       absolute level than the te reo CVCV recordings, so -5.07 dB puts both word
+       sets on the same effective level scale under a single audiometer
+       calibration, and makes the CVC and CVCV 1 kHz tones meter to the same
+       reading at one dial setting.
+
+       This is only the shipped DEFAULT. A clinician can change it in-app from the
+       Calibration panel (behind a confirmation); that saved value overrides this.
+       Change this line only if your CVC recordings have a different relationship
+       to the CVCV set. Re-calibrate after any change. */
+    cvcFileGainDb: -5.07
+  },
+
   timing: {
 
     /* Silence between the end of the "Kōrero mai…" carrier and the
