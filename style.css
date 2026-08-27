@@ -1140,3 +1140,45 @@ details summary {
   border: 1px solid #e2e8f0; border-radius: 6px; background: #fff;
 }
 .adaptive-progress-strong { font-weight: 600; color: #0f172a; }
+
+/* ── Experiment mode (thesis) ─────────────────────────────────────────── */
+/* Ghosted fields: dictated by the allocation, locked but still readable. */
+.experiment-ghost,
+.experiment-ghost * {
+  opacity: .55;
+  pointer-events: none;
+}
+.experiment-ghost {
+  position: relative;
+}
+.experiment-table th { font-weight: 600; }
+.experiment-table td { border-bottom: 1px solid var(--line); }
+.experiment-row-current { background: #eef6ff; }
+.experiment-row-done { color: #6b7280; }
+.experiment-done, .experiment-row-current td:last-child { color: #1d4ed8; font-weight: 600; }
+.experiment-modal {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1.25rem 1.4rem;
+  box-shadow: 0 10px 40px rgba(0,0,0,.18);
+  max-width: 36rem;
+}
+.experiment-modal::backdrop { background: rgba(0,0,0,.35); }
+
+/* Participant input modes (experiment) */
+.participant-inputs .pi-warn { color: #b45309; font-weight: 600; }
+.participant-ear input[type="number"] { padding: .15rem .25rem; }
+@media (max-width: 720px) {
+  .participant-ears { grid-template-columns: 1fr !important; }
+}
+
+/* Masking advisor */
+.masking-advisor { border-top: 1px solid var(--line); padding-top: .5rem; }
+#maskingAdvice { font-size: .84rem; line-height: 1.4; }
+#maskingAdvice.pi-warn { color: #b45309; font-weight: 600; }
+
+/* Experiment playlist status */
+.experiment-row-aborted { color: #b91c1c; }
+.experiment-row-aborted .experiment-mark { font-weight: 700; }
+.experiment-row:hover { background: #f1f5f9; }
+.experiment-row-current { background: #eef6ff; }

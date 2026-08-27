@@ -100,15 +100,39 @@
     const ear = admin.ear === "L" ? "left" : "right";
     if ($("presentationCondition")) $("presentationCondition").value = ear;
     if ($("stimEar")) $("stimEar").value = ear;
-    // Adaptive settings: A1, 30 words, fixed start level.
+    // Adaptive settings: A1, 30 words.
     if ($("adaptiveProcedure")) $("adaptiveProcedure").value = "A1";
     if ($("adaptiveNTrials")) $("adaptiveNTrials").value = 30;
-    if ($("adaptiveStartLevel") && !$("adaptiveStartLevel").value) $("adaptiveStartLevel").value = 60;
+
+    // Starting level for THIS ear, from the participant specification (band table
+    // on 2 kHz / PTA / 4FA, or an entered start value). Falls back to 60 if the
+    // ear hasn't been specified yet.
+    let startLevel = 60, startUnit = "dbA", startWarn = false;
+    if (global.ParticipantInputs && typeof global.ParticipantInputs.startLevelFor === "function") {
+      const s = global.ParticipantInputs.startLevelFor(ear);
+      if (s) { startLevel = s.level; startUnit = s.unit; startWarn = s.warnCeiling; }
+    }
+    if ($("adaptiveStartLevel")) $("adaptiveStartLevel").value = startLevel;
+
+    // Manual masker (used in the reduced-input modes with no audiogram): set the
+    // live masker level and, if "track with presentation level" is ticked, leave
+    // the app's adaptive masker-offset mechanism to follow the level.
+    if (global.ParticipantInputs && typeof global.ParticipantInputs.maskerFor === "function") {
+      const m = global.ParticipantInputs.maskerFor(ear);
+      if (m && m.level != null) {
+        if ($("maskLevel")) $("maskLevel").value = m.level;
+        if ($("maskEar")) $("maskEar").value = (ear === "left" ? "right" : "left"); // mask the NON-test ear
+      }
+    }
+
     // Lists: the three allocation lists for this administration.
     global.state.adaptiveForm = global.state.adaptiveForm || {};
     global.state.adaptiveForm.selectedLists = admin.lists.slice();
     global.state.adaptiveForm.procedure = "A1";
     global.state.adaptiveForm.nTrials = 30;
+    global.state.adaptiveForm.startLevel = startLevel;
+    // Remember the derived start info for the export.
+    admin._startLevel = startLevel; admin._startUnit = startUnit; admin._startWarn = startWarn;
     // Reflect list selection into the picker UI if the app exposes a renderer.
     if (typeof global.renderAdaptiveListPicker === "function") {
       try { global.renderAdaptiveListPicker(); } catch {}
@@ -128,37 +152,123 @@
 
   function startParticipant(participant) {
     const xs = xstate();
+    const admins = adminsFor(participant);
     xs.participant = participant;
     xs.position = 0;
     xs.running = false;
     xs.active = true;
+    // Per-position status: "pending" | "done" | "aborted". Authoritative for the
+    // playlist display and for finding the next thing to run. Preserved across a
+    // restart of the SAME participant so completed positions keep their ticks
+    // unless the clinician explicitly repeats them.
+    if (!Array.isArray(xs.status) || xs.statusParticipant !== participant) {
+      xs.status = admins ? admins.map(() => "pending") : [];
+      xs.statusParticipant = participant;
+    }
     if (typeof global.saveSession === "function") global.saveSession();
     renderSection();
-    promptNextPosition();
+    goToNextPending();
   }
 
-  function promptNextPosition() {
+  // Index of the first pending position, or -1 if none remain.
+  function nextPendingIndex() {
+    const xs = xstate();
+    if (!Array.isArray(xs.status)) return -1;
+    return xs.status.findIndex(s => s === "pending");
+  }
+
+  // Move to the next pending position and prompt it; if none, show completion.
+  function goToNextPending() {
+    const xs = xstate();
+    const idx = nextPendingIndex();
+    if (idx === -1) { xs.running = false; renderSection(); showComplete(); return; }
+    xs.position = idx;
+    promptPosition(idx);
+  }
+
+  // Run a SPECIFIC position (from a playlist click, or the linear flow). If it
+  // already has data (done/aborted), running it again REPLACES that data — the
+  // prior CSV rows are marked superseded so the analysis keeps every take but
+  // knows which is current.
+  function runPosition(idx) {
+    const xs = xstate();
+    const admins = adminsFor(xs.participant);
+    if (!admins || idx < 0 || idx >= admins.length) return;
+    xs.position = idx;
+    promptPosition(idx);
+  }
+
+  function promptPosition(idx) {
     const xs = xstate();
     const admins = adminsFor(xs.participant);
     if (!admins) return;
-    if (xs.position >= admins.length) { showComplete(); return; }
-    const admin = admins[xs.position];
+    const admin = admins[idx];
     applyAdminToForm(admin);
     showInstructionModal(admin);
   }
 
-  // Called by the app when a track finishes (via the finishAdaptiveTrack hook).
+  // Called by the app when a track finishes.
   function onTrackFinished(summary) {
     const xs = xstate();
     if (!xs.active || !xs.running) return;   // not an experiment-driven track
     const admin = currentAdmin();
     if (!admin) return;
-    recordAdministration(admin, summary);
+    const idx = xs.position;
+    // If this position already had data (a repeat/replace), mark prior rows
+    // superseded so the analysis keeps every take but knows which is current.
+    const wasReplaced = Array.isArray(xs.status) && xs.status[idx] && xs.status[idx] !== "pending";
+    if (wasReplaced) supersedePriorRows(admin.position);
+    recordAdministration(admin, summary, wasReplaced ? (takeCount(admin.position) + 1) : 1);
+    if (Array.isArray(xs.status)) xs.status[idx] = "done";
     xs.running = false;
-    xs.position += 1;
     if (typeof global.saveSession === "function") global.saveSession();
+    renderSection();   // show the ✓ at once, before the next prompt
     // Small delay so the app's own summary dialog is seen first.
-    setTimeout(() => promptNextPosition(), 50);
+    setTimeout(() => goToNextPending(), 50);
+  }
+
+  // Called by the app when an experiment-driven track is abandoned.
+  function onTrackAborted() {
+    const xs = xstate();
+    if (!xs.active || !xs.running) return;
+    const idx = xs.position;
+    if (Array.isArray(xs.status)) xs.status[idx] = "aborted";
+    xs.running = false;
+    if (typeof global.saveSession === "function") global.saveSession();
+    renderSection();
+  }
+
+  // How many recorded takes exist for a given 1-based position (for take numbering).
+  function takeCount(position) {
+    const xs = xstate();
+    if (!xs.adminCsv) return 0;
+    let n = 0;
+    xs.adminCsv.split("\n").forEach((line, i) => {
+      if (i === 0 || !line) return;
+      const cols = line.split(",");
+      if (Number(cols[1]) === position && Number(cols[0]) === xs.participant) n++;
+    });
+    return n;
+  }
+
+  // Mark all prior CSV rows for this participant+position as superseded (set the
+  // 'current' flag to 0). Keeps the raw data; flags which take is authoritative.
+  function supersedePriorRows(position) {
+    const xs = xstate();
+    if (!xs.adminCsv) return;
+    const lines = xs.adminCsv.split("\n");
+    const header = lines[0].split(",");
+    const curIdx = header.indexOf("is_current");
+    if (curIdx === -1) return;
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i]) continue;
+      const cols = lines[i].split(",");
+      if (Number(cols[0]) === xs.participant && Number(cols[1]) === position) {
+        cols[curIdx] = "0";
+        lines[i] = cols.join(",");
+      }
+    }
+    xs.adminCsv = lines.join("\n");
   }
 
   // ── Data layer: build and append CSV rows ─────────────────────────────
@@ -172,13 +282,14 @@
   const ADMIN_HEADER = [
     "participant_id", "order_position", "repeat", "condition", "ear", "language",
     "lists", "SRT20_dB", "SRT30_dB", "slope30", "fit30_converged", "n_obs30",
-    "start_level_dB", "masker_ear", "masker_offset_dB", "phoneme_count",
-    "PTA_dB", "timestamp"
+    "start_level_dB", "start_unit", "input_mode", "ref_threshold_HL", "best_BC_HL",
+    "masker_ear", "masker_offset_dB", "manual_masker_dB", "masker_tracks_PL",
+    "phoneme_count", "PTA_dB", "take", "is_current", "timestamp"
   ];
   const TRIAL_HEADER = [
     "participant_id", "order_position", "repeat", "ear", "language",
     "trial_index", "word", "list_number", "level_dB",
-    "phonemes_correct", "phonemes_total", "word_correct"
+    "phonemes_correct", "phonemes_total", "word_correct", "take"
   ];
 
   // Persist accumulating CSV text in state so it survives reloads and can be
@@ -189,7 +300,7 @@
     if (!xs.trialCsv) xs.trialCsv = csvRow(TRIAL_HEADER) + "\n";
   }
 
-  function recordAdministration(admin, summary) {
+  function recordAdministration(admin, summary, take = 1) {
     ensureStores();
     const xs = xstate();
     const log = (summary && summary.log) || [];
@@ -201,6 +312,9 @@
     const srt20 = fit20 ? fit20.srt : null;
 
     const pid = xs.participant;
+    const ear = admin.ear === "L" ? "left" : "right";
+    const inp = (global.ParticipantInputs && global.ParticipantInputs.dataFor)
+      ? global.ParticipantInputs.dataFor(ear) : null;
     xs.adminCsv += csvRow([
       pid, admin.position, admin.repeat, admin.condition, admin.ear, admin.language,
       admin.lists.join("+"),
@@ -209,15 +323,23 @@
       summary && summary.slope != null ? summary.slope.toFixed(5) : "",
       summary ? (summary.fitConverged ? 1 : 0) : "",
       summary ? summary.nObservations : "",
-      summary ? summary.startLevel : "",
+      admin._startLevel != null ? admin._startLevel : (summary ? summary.startLevel : ""),
+      admin._startUnit || "dbA",
+      inp ? inp.mode : "",
+      inp && inp.referenceThreshold != null ? inp.referenceThreshold : "",
+      inp && inp.bestBC != null ? inp.bestBC : "",
       summary ? summary.maskerEar : "",
       summary && summary.maskerOffsetDb != null ? summary.maskerOffsetDb.toFixed(2) : "",
+      inp && inp.masker && inp.masker.level != null ? inp.masker.level : "",
+      inp && inp.masker ? (inp.masker.track ? 1 : 0) : "",
       summary ? summary.phonemeCount : "",
       "",                       // PTA_dB — nullable, merged later by participant_id
+      take,                     // take number (1 = first; higher = repeat/replace)
+      1,                        // is_current — this newest take supersedes earlier ones
       summary ? summary.timestamp : new Date().toISOString()
     ]) + "\n";
 
-    // Trial-level rows.
+    // Trial-level rows (tagged with take so repeats are distinguishable).
     log.forEach((l, i) => {
       xs.trialCsv += csvRow([
         pid, admin.position, admin.repeat, admin.ear, admin.language,
@@ -225,7 +347,8 @@
         l.sourceList != null ? l.sourceList : "",
         l.level != null ? l.level.toFixed(2) : "",
         l.correct, l.phonemes,
-        (l.correct != null && l.phonemes) ? (l.correct === l.phonemes ? 1 : 0) : ""
+        (l.correct != null && l.phonemes) ? (l.correct === l.phonemes ? 1 : 0) : "",
+        take
       ]) + "\n";
     });
   }
@@ -304,8 +427,16 @@
     section.querySelector("#experimentStartBtn").onclick = () => {
       const p = Number(sel.value);
       if (!p) { alert("Select a participant first."); return; }
-      if (xstate().participant && xstate().position > 0 &&
-          !confirm(`Restart participant ${p} from position 1? Progress markers reset (data already written to CSV is kept).`)) return;
+      const xs = xstate();
+      const switching = xs.participant && xs.participant !== p;
+      const hasProgress = xs.participant === p && Array.isArray(xs.status) &&
+                          xs.status.some(s => s !== "pending");
+      if (hasProgress &&
+          !confirm(`Participant ${p} already has progress. Continue from the next ` +
+                   `unfinished position? (Completed positions keep their results; use ` +
+                   `the row clicks to repeat individual ones.)`)) return;
+      if (switching && !confirm(`Switch to participant ${p}? The current participant's ` +
+          `progress markers are cleared (data already written to CSV is kept).`)) return;
       startParticipant(p);
     };
     section.querySelector("#experimentClearBtn").onclick = clearParticipant;
@@ -317,6 +448,7 @@
   function clearParticipant() {
     const xs = xstate();
     xs.participant = null; xs.position = 0; xs.running = false;
+    xs.status = null; xs.statusParticipant = null;
     setGhosted(false);
     renderSection();
     if (typeof global.saveSession === "function") global.saveSession();
@@ -327,6 +459,11 @@
     const unlocked = isExperimentUnlocked();
     section.hidden = !unlocked;
     if (!unlocked) { setGhosted(false); return; }
+
+    // Participant specification panel (per-ear input modes).
+    if (global.ParticipantInputs && typeof global.ParticipantInputs.render === "function") {
+      try { global.ParticipantInputs.render(); } catch (e) { console.error("[experiment] inputs render:", e); }
+    }
 
     const xs = xstate();
     const sel = section.querySelector("#experimentParticipant");
@@ -340,21 +477,28 @@
       return;
     }
     const admins = adminsFor(xs.participant);
-    progress.innerHTML = `Participant <b>${xs.participant}</b> — position ` +
-      `<b>${Math.min(xs.position + 1, admins.length)}</b> of ${admins.length}` +
-      (xs.position >= admins.length ? ` · <span class="experiment-done">complete</span>` : "");
+    const status = Array.isArray(xs.status) ? xs.status : admins.map(() => "pending");
+    const doneCount = status.filter(s => s === "done").length;
+    progress.innerHTML = `Participant <b>${xs.participant}</b> — ` +
+      `<b>${doneCount}</b> of ${admins.length} done` +
+      (doneCount === admins.length ? ` · <span class="experiment-done">complete</span>` : "") +
+      ` · <span class="hint">click any row to run, repeat or replace it</span>`;
 
     const rows = admins.map((a, i) => {
-      const done = i < xs.position;
-      const current = i === xs.position;
-      const cls = done ? "experiment-row-done" : current ? "experiment-row-current" : "";
-      return `<tr class="${cls}">
+      const st = status[i] || "pending";
+      const isCurrent = i === xs.position && xs.running;
+      const cls = st === "done" ? "experiment-row-done"
+                : st === "aborted" ? "experiment-row-aborted"
+                : isCurrent ? "experiment-row-current" : "";
+      const mark = st === "done" ? "✓" : st === "aborted" ? "✗" : isCurrent ? "▶" : "";
+      const action = st === "done" ? "repeat" : st === "aborted" ? "retry" : "run";
+      return `<tr class="experiment-row ${cls}" data-idx="${i}" title="Click to ${action} this position" style="cursor:pointer">
         <td style="padding:.2rem .4rem">${a.position}</td>
         <td style="padding:.2rem .4rem">r${a.repeat}</td>
         <td style="padding:.2rem .4rem">${a.language === "maori" ? "Māori" : "English"}</td>
         <td style="padding:.2rem .4rem">${earWord(a.ear)}</td>
         <td style="padding:.2rem .4rem">${a.lists.join(", ")}</td>
-        <td style="padding:.2rem .4rem">${done ? "✓" : current ? "▶" : ""}</td>
+        <td style="padding:.2rem .4rem" class="experiment-mark">${mark}</td>
       </tr>`;
     }).join("");
     table.innerHTML =
@@ -363,6 +507,23 @@
         <th style="padding:.2rem .4rem">Lang</th><th style="padding:.2rem .4rem">Ear</th>
         <th style="padding:.2rem .4rem">Lists</th><th style="padding:.2rem .4rem"></th>
       </tr></thead><tbody>${rows}</tbody>`;
+
+    // Click a row to run/repeat/replace that position.
+    table.querySelectorAll("tr.experiment-row").forEach(tr => {
+      tr.onclick = () => {
+        const idx = Number(tr.getAttribute("data-idx"));
+        const st = (xs.status && xs.status[idx]) || "pending";
+        if (xs.running) {
+          alert("A track is currently running. Finish or abandon it before choosing another position.");
+          return;
+        }
+        if (st !== "pending" &&
+            !confirm(`Position ${admins[idx].position} already has a result (${st}). ` +
+                     `Run it again? The new take replaces the old as the current result ` +
+                     `(the previous take is kept in the data, marked superseded).`)) return;
+        runPosition(idx);
+      };
+    });
   }
 
   // ── Instruction & completion modals ───────────────────────────────────
@@ -442,8 +603,8 @@
 
   // Expose a tiny API (used by init hook in app.js and for debugging).
   global.Experiment = {
-    init, renderSection, isExperimentUnlocked, onTrackFinished,
-    downloadAdminCsv, downloadTrialCsv
+    init, renderSection, isExperimentUnlocked, onTrackFinished, onTrackAborted,
+    runPosition, downloadAdminCsv, downloadTrialCsv
   };
 
   // Auto-init after load. Deferred a tick so the surrounding scripts (app.js,

@@ -147,7 +147,14 @@ const LANGUAGES = {
     hasTraining: true,
     randomiseOrder: true,   // default: shuffle word order (fixed order not yet settled)
     unit: "kupu",           // singular term for the stimulus
-    unitTitle: "Kupu"
+    unitTitle: "Kupu",
+    // RMS level of the masker noise relative to this language's 1 kHz calibration
+    // tone, in dB. Measured: the CVCV noise sits +0.75 dB (RMS) above the CVCV
+    // tone. With tone-referenced audiometer zeroing (both channels zeroed to the
+    // tone, NOT re-zeroed on the noise), the software must subtract this so the
+    // masker presents at a known level relative to the dial. See maskerNoiseAdjustDb().
+    noiseVsToneDb: 0.75,
+    maskerNoiseFile: "noise"   // base name resolved in sounds/
   },
   english: {
     key: "english",
@@ -160,7 +167,14 @@ const LANGUAGES = {
     hasTraining: false,
     randomiseOrder: false,  // default: present in listed order (CVC convention)
     unit: "word",
-    unitTitle: "Word"
+    unitTitle: "Word",
+    // Millennium CVC noise sits +0.76 dB (RMS) above the CVC 1 kHz tone — the
+    // same relationship as CVCV, so the two systems mask identically once this
+    // correction is applied. (The CVC noise, if used, lives in sounds_cvc/ and
+    // also carries the folder gain adjustment; this constant is the additional
+    // tone-referenced correction, matching CVCV's.)
+    noiseVsToneDb: 0.76,
+    maskerNoiseFile: "noise"
   }
 };
 
@@ -382,13 +396,12 @@ function lessLevelAdvice() {
 // levels anyone presents. Raise it only if the source material's bit depth does.
 const MAX_ATTENUATION_DB = 96;
 
-// dB(A) values below this aren't sound pressure levels. A physical sanity bound
-// that stops the floor going negative when the reference is under 96 dB(A);
-// it is not a clinical floor.
-const ABSOLUTE_FLOOR_DBA = 0;
-
-// Bounds for any dB(A) level the clinician can set. null when uncalibrated —
-// the dB FS path is a different quantity and is left alone.
+// The ONLY floor on presentation level is the recording's dynamic range: below
+// reference − MAX_ATTENUATION_DB you are digging into quantisation noise. There
+// is no floor at 0 dB(A). Negative dB(A)/dB SPL are perfectly valid — they are
+// simply pressures below the 20 µPa reference (a normal threshold at 2–4 kHz is
+// itself below 0 dB SPL). Both audiometer and sound-field modes are bounded only
+// by attenuation.
 function levelBounds() {
   const cal = state.calibration;
   if (!cal.isCalibrated || cal.measuredDbA === null) return null;
@@ -397,12 +410,11 @@ function levelBounds() {
   // every selectable position is genuinely inside the bounds.
   const max = Math.floor(reference / 5) * 5;
   const attenuationFloor = reference - MAX_ATTENUATION_DB;
-  const min = Math.ceil(Math.max(ABSOLUTE_FLOOR_DBA, attenuationFloor) / 5) * 5;
+  const min = Math.ceil(attenuationFloor / 5) * 5;
   return {
     reference, min, max,
     usable: min <= max,
-    span: max - min,
-    floorIsAbsolute: attenuationFloor < ABSOLUTE_FLOOR_DBA
+    span: max - min
   };
 }
 
@@ -416,6 +428,27 @@ function clampLevel(value) {
 
 // Masker shares the reference with the stimulus — same gain path.
 function maskerLevel() { return clampLevel($("maskLevel") ? $("maskLevel").value : 0); }
+
+/* ── Masker noise-vs-tone correction ──────────────────────────────────────
+   With tone-referenced audiometer calibration (both channels zeroed to the 1 kHz
+   tone, not re-zeroed on the noise), the masker file plays hotter than the dial
+   by its measured noise-vs-tone RMS offset. Subtract that offset from the masker
+   gain so "masker at N dB" means N dB relative to the dial reference, matching
+   what a noise-track VU null used to give for free. Per language; overridable via
+   config.js: window.APP_CONFIG.masking = { noiseVsToneDb: { maori: 0.75, english: 0.76 } }.
+   Returns a SIGNED adjustment (negative = attenuate) suitable for gainForLevel's
+   adjustDb argument. Only sound-field mode, which is noise-referenced by its own
+   calibration, skips it. */
+function maskerNoiseAdjustDb() {
+  const L = lang();
+  const cfg = window.APP_CONFIG?.masking?.noiseVsToneDb?.[L.key];
+  const off = Number.isFinite(Number(cfg)) ? Number(cfg)
+            : (Number.isFinite(Number(L.noiseVsToneDb)) ? Number(L.noiseVsToneDb) : 0);
+  // Sound-field calibration references the noise directly (meter reads the noise),
+  // so no tone-referenced correction is needed there.
+  if (calMethod() === "soundfield") return 0;
+  return -off;   // file is +off above the tone → attenuate by off to sit at dial
+}
 
 // Transient note in the test-screen nudge bar. Creates its own element.
 function flashLevelLimit(msg) {
@@ -470,11 +503,6 @@ function renderCalStatus() {
     ? `To present above ${b.max} dB(A), raise the audiometer dial and recalibrate.`
     : `That is the most this setup can deliver — more level needs a different speaker ` +
       `or amplifier, or a closer position.`);
-  if (b.floorIsAbsolute) {
-    // Reference is under 96 dB(A), so the recordings' range runs out before then:
-    // the floor simply sits at 0 dB(A) rather than reference − 96. Not a fault.
-    parts.push(`Range bottoms out at ${ABSOLUTE_FLOOR_DBA} dB(A).`);
-  }
   if (state.calibration.strandedLists) {
     parts.push(`${state.calibration.strandedLists} list(s) already tested outside ` +
       `${b.min}–${b.max} dB(A); their recorded levels are unchanged — check the report ` +
@@ -523,6 +551,7 @@ function init() {
   applyLanguageToUI();
   setupCalibrationSlider();
   refreshPI();
+  if (typeof window !== "undefined" && window.MaskingUI) window.MaskingUI.init();
   if ($("maskingEnabled")) updateMaskingEnabled();
   offerStoredCalibration();
   renderRecentSessions();
@@ -549,6 +578,10 @@ function loadClinicSettings() {
     if ($("clinician") && d.clinician) $("clinician").value = d.clinician;
     if ($("clinicianRole") && d.role) $("clinicianRole").value = d.role;
     if ($("transducer") && d.transducer) $("transducer").value = d.transducer;
+    if (d.iaa && typeof d.iaa === "object") {
+      state.masking = state.masking || {};
+      state.masking.iaa = Object.assign({ supraaural:40, insert:55, airpods:45, other:40 }, d.iaa);
+    }
   } catch {}
 }
 
@@ -559,6 +592,7 @@ function saveClinicSettings() {
     clinician: $("clinician") ? $("clinician").value.trim() : "",
     role: $("clinicianRole") ? $("clinicianRole").value.trim() : "",
     transducer: $("transducer") ? $("transducer").value : "",
+    iaa: (state.masking && state.masking.iaa) ? state.masking.iaa : undefined,
     logo: state.clinicLogo || null
   };
   localStorage.setItem("ucCVCVClinic", JSON.stringify(data));
@@ -2466,10 +2500,15 @@ function renderCalMethodUI() {
   if (earWrap) earWrap.style.display = sel === "audiometer" ? "" : "none";
   if (earHint) {
     earHint.textContent = sel === "audiometer"
-      ? "Calibrate each channel separately: route to Left, set the aux gain, then Right."
+      ? "Play the tone to BOTH channels and zero each audiometer input (A and B) " +
+        "to VU 0 off this one tone. Both channels are then referenced to the tone, " +
+        "so the software can place speech and masker correctly on either side."
       : "";
   }
-  if (sel !== "audiometer" && $("calEarSelect")) {
+  // New (safer) audiometer scheme: the tone goes to BOTH channels and the
+  // clinician zeroes A and B off it, so an ear-swap mid-test can never leave a
+  // channel mis-referenced. Default the routing to binaural in every method.
+  if ($("calEarSelect")) {
     $("calEarSelect").value = "binaural";
     setCalibrationEar("binaural");
   }
@@ -3350,7 +3389,7 @@ function syncMaskerControls() {
 function updateLiveMasker() {
   syncMaskerControls();
   if (state.audio.masker) {
-    state.audio.masker.gain.gain.value = gainForLevel(maskerLevel());
+    state.audio.masker.gain.gain.value = gainForLevel(maskerLevel(), maskerNoiseAdjustDb());
     state.audio.masker.pan.pan.value = $("maskEar").value === "left" ? -1 : $("maskEar").value === "right" ? 1 : 0;
     if ($("maskEar").value === "off") stopMasker();
     else setMaskerIndicator(true);
@@ -3375,7 +3414,7 @@ async function startMasker() {
 
     source.buffer = buffer;
     source.loop = true;
-    gain.gain.value = gainForLevel(maskerLevel());
+    gain.gain.value = gainForLevel(maskerLevel(), maskerNoiseAdjustDb());
     const maskEarVal = $("maskEar").value;
     // Same splitter/merger ear routing as the stimulus path, so the masker's
     // in-ear level matches its on-screen dB regardless of ear (no panner boost).
@@ -3767,6 +3806,11 @@ function abandonList() {
   q.status = "abandoned";
   if (state.adaptive) state.adaptive = null;   // drop any live adaptive engine
   stopMasker();
+  // Let experiment mode mark this position aborted (✗) if it drove the track.
+  if (typeof window !== "undefined" && window.Experiment &&
+      typeof window.Experiment.onTrackAborted === "function") {
+    try { window.Experiment.onTrackAborted(); } catch (e) { console.error("[experiment] onTrackAborted:", e); }
+  }
   saveSession();
   if (state.results?.length) autoSaveJson();
   renderQueue();
@@ -4694,16 +4738,26 @@ function startAdaptiveTrack() {
   saveSession();
 }
 
-// Keep the masker following the current stimulus level at the fixed offset.
+// Keep the masker following the current stimulus level. Two modes:
+//  • Clinical auto-masking (MaskingUI "Auto"): the masker level comes from the
+//    masking rules (PL − IAA + ABgap + 10), retracked with a gentle ramp.
+//  • Otherwise: hold the fixed stimulus−masker SNR offset dialled in at track start.
 function applyAdaptiveMaskerLevel() {
   const a = state.adaptive;
-  if (!a || a.maskerOffsetDb == null) return;
+  if (!a) return;
+  // Clinical auto-masking takes precedence when the clinician has enabled it.
+  if (typeof window !== "undefined" && window.MaskingUI &&
+      $("maskingAuto") && $("maskingAuto").checked) {
+    window.MaskingUI.onLevelChanged();
+    return;
+  }
+  if (a.maskerOffsetDb == null) return;
   const q = currentQueueItem();
   if (!q) return;
   const target = clampLevel(q.levelDbA - a.maskerOffsetDb);
   if ($("maskLevel")) $("maskLevel").value = target;
   if ($("maskLevelLive")) $("maskLevelLive").value = target;
-  if (state.audio.masker) state.audio.masker.gain.gain.value = gainForLevel(target);
+  if (state.audio.masker) state.audio.masker.gain.gain.value = gainForLevel(target, maskerNoiseAdjustDb());
 }
 
 // Build a readable transcription of what the clinician entered for a word.

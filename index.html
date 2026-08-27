@@ -98,6 +98,7 @@
                   <select id="transducer">
                     <option value="insert earphones">Insert earphones</option>
                     <option value="headphones">Headphones</option>
+                    <option value="airpods">AirPods / earbuds</option>
                     <option value="sound field speaker">Sound field speaker</option>
                     <option value="bone conductor">Bone conductor</option>
                     <option value="other">Other</option>
@@ -121,6 +122,40 @@
                   <input id="maskLevel" type="number" step="5" value="40">
                 </label>
               </div>
+
+              <div id="maskingAdvisor" class="masking-advisor" style="margin-top:.6rem">
+                <div id="maskingAdvice" class="hint"></div>
+                <div class="actions wrap" id="maskingAdviceActions" style="margin-top:.35rem;display:none">
+                  <label style="display:flex;align-items:center;gap:.4rem;font-size:.82rem">
+                    <input type="checkbox" id="maskingAuto"> Auto-apply &amp; track presentation level
+                  </label>
+                  <button type="button" id="maskingApplyBtn" class="secondary" style="font-size:.8rem;padding:.25rem .6rem">Apply recommendation</button>
+                </div>
+                <details id="iaaSettings" style="margin-top:.5rem">
+                  <summary style="font-size:.82rem">Interaural attenuation (IAA) settings</summary>
+                  <p class="hint" style="font-size:.8rem;margin:.3rem 0">
+                    Conservative speech defaults, in dB. Editable — e.g. set your own value for AirPods.
+                  </p>
+                  <div class="grid three" style="gap:.4rem">
+                    <label style="font-size:.8rem">Supra-aural
+                      <input id="iaa_supraaural" type="number" step="1" value="40">
+                    </label>
+                    <label style="font-size:.8rem">Insert
+                      <input id="iaa_insert" type="number" step="1" value="55">
+                    </label>
+                    <label style="font-size:.8rem">AirPods / earbuds
+                      <input id="iaa_airpods" type="number" step="1" value="45">
+                    </label>
+                  </div>
+                </details>
+              </div>
+            </div>
+
+            <div class="card" id="participantCard">
+              <details id="participantDetails">
+                <summary><strong>Participant / audiogram</strong> — optional, derives the starting level</summary>
+                <div id="participantInputsMount"></div>
+              </details>
             </div>
 
             <div class="card" id="adaptiveCard" hidden>
@@ -144,6 +179,7 @@
                   <input id="adaptiveNTrials" type="number" step="1" min="4" value="20">
                 </label>
               </div>
+              <p class="hint" id="participantStartRationale" style="margin:.2rem 0 0"></p>
               <p class="hint" id="adaptiveTrialsHint">
                 A1 default 20 trials (2 lists of 10); A2 default 30 trials (3 lists of 10).
               </p>
@@ -737,6 +773,9 @@
   <script src="adaptive.js"></script>
   <script src="app.js"></script>
   <script src="experiment_allocation.js"></script>
+  <script src="participant_inputs.js"></script>
+  <script src="masking.js"></script>
+  <script src="masking_ui.js"></script>
   <script src="experiment.js"></script>
 </body>
 </html>
