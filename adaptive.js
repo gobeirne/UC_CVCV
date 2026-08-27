@@ -399,6 +399,42 @@
     return { x: simplex[0].x, fx: simplex[0].fx, iterations: maxIterations, converged: false };
   }
 
+  // ── Standalone re-fit from a log slice (for SRT(20) vs SRT(30) etc.) ──
+  // Reconstructs the per-phoneme observations from log entries (each carries
+  // level, correct, phonemes) and runs the identical MLE the session uses, so a
+  // truncated estimate is computed exactly like the full one. `logEntries` is an
+  // array of {level, correct, phonemes}; `floor` defaults to the open-set 0.
+  // Returns { srt, slope, nll, converged, n } or null if too little data.
+  function fitFromLog(logEntries, floor = DEFAULT_PER_UNIT_FLOOR) {
+    const xs = [], ys = [];
+    for (const e of (logEntries || [])) {
+      const lvl = Number(e.level);
+      const ph = Number(e.phonemes) || 0;
+      const cor = Number(e.correct) || 0;
+      if (!isFinite(lvl) || ph <= 0) continue;
+      for (let i = 0; i < ph; i++) { xs.push(lvl); ys.push(i < cor ? 1 : 0); }
+    }
+    if (xs.length < 4) return null;
+    const nll = (params) => {
+      const srt = params[0];
+      const slope = Math.exp(params[1]);
+      if (!isFinite(srt) || !isFinite(slope) || slope <= 0 || slope > 10) return Number.POSITIVE_INFINITY;
+      const eps = 1e-12;
+      let s = 0;
+      for (let i = 0; i < xs.length; i++) {
+        let p = floor + (1 - floor) * intelligibilityClean(xs[i], srt, slope);
+        p = Math.min(1 - eps, Math.max(eps, p));
+        s += -(ys[i] * Math.log(p) + (1 - ys[i]) * Math.log(1 - p));
+      }
+      return s;
+    };
+    const sorted = xs.slice().sort((a, b) => a - b);
+    const medianX = sorted[Math.floor(sorted.length / 2)];
+    const res = nelderMead(nll, [isFinite(medianX) ? medianX : 0, Math.log(0.1)],
+                           [2.0, 0.5], { maxIterations: 600, tolerance: 1e-9 });
+    return { srt: res.x[0], slope: Math.exp(res.x[1]), nll: res.fx, converged: res.converged, n: xs.length, floor };
+  }
+
   global.Adaptive = {
     BK_DEFAULTS,
     DEFAULT_PER_UNIT_FLOOR,
@@ -406,6 +442,7 @@
     AdaptiveSession,
     intelligibilityClean,
     perUnitCurve,
-    nelderMead
+    nelderMead,
+    fitFromLog
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -293,6 +293,11 @@ const state = {
   }
 };
 
+// Expose the app state on window so the optional experiment module (a separate
+// classic script) can read and extend it. Top-level `const` is not a window
+// property, so this bridge is explicit. No effect on normal operation.
+if (typeof window !== "undefined") window.state = state;
+
 const $ = (id) => document.getElementById(id);
 
 function snap5(value) {
@@ -4852,6 +4857,13 @@ function finishAdaptiveTrack() {
   };
   if (!Array.isArray(state.adaptiveTracks)) state.adaptiveTracks = [];
   state.adaptiveTracks.push(summary);
+
+  // Notify the optional experiment module that a track completed, so it can
+  // record the administration and advance the stepper. No-op when inactive.
+  if (typeof window !== "undefined" && window.Experiment &&
+      typeof window.Experiment.onTrackFinished === "function") {
+    try { window.Experiment.onTrackFinished(summary); } catch (e) { console.error("[experiment] onTrackFinished:", e); }
+  }
 
   renderAdaptiveViews();
   showAdaptiveSummary(fit);
