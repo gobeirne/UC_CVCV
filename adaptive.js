@@ -435,6 +435,40 @@
     return { srt: res.x[0], slope: Math.exp(res.x[1]), nll: res.fx, converged: res.converged, n: xs.length, floor };
   }
 
+  // Rebuild an AdaptiveSession to the exact state captured in a snapshot, by
+  // replaying its scored trials. The engine is a pure function of its trial
+  // history, so replaying (level, proportion-correct) through record() restores
+  // level, reversals, direction and fit data identically. For A2 the original
+  // interleave is restored first (it's random per build); for A1 it's trivial.
+  // snapshot = { meta:{procedure,startLevel,nTrials,phonemeCount,perUnitFloor,
+  //   bk,pTargets,interleave,pos}, log:[{trackId?,level,correct,phonemes}|
+  //   {level,outcomes}] }.
+  function replaySession(snapshot) {
+    if (!snapshot || !snapshot.meta) return null;
+    const m = snapshot.meta;
+    const s = new AdaptiveSession({
+      procedure: m.procedure, startLevel: m.startLevel, nTrials: m.nTrials,
+      phonemeCount: m.phonemeCount, perUnitFloor: m.perUnitFloor,
+      bk: m.bk, pTargets: m.pTargets
+    });
+    if (Array.isArray(m.interleave) && m.interleave.length) {
+      s.interleave = m.interleave.slice();
+    }
+    for (const e of (snapshot.log || [])) {
+      // Reconstruct a phoneme-outcome vector giving the same proportion. record()
+      // only uses the proportion, so exact ordering doesn't matter.
+      let outcomes;
+      if (Array.isArray(e.outcomes)) outcomes = e.outcomes;
+      else {
+        const n = e.phonemes || s.phonemeCount;
+        const c = e.correct != null ? e.correct : Math.round((e.result || 0) * n);
+        outcomes = Array.from({ length: n }, (_, i) => (i < c ? 1 : 0));
+      }
+      s.record(outcomes, e.level);
+    }
+    return s;
+  }
+
   global.Adaptive = {
     BK_DEFAULTS,
     DEFAULT_PER_UNIT_FLOOR,
@@ -443,6 +477,7 @@
     intelligibilityClean,
     perUnitCurve,
     nelderMead,
-    fitFromLog
+    fitFromLog,
+    replaySession
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -281,7 +281,8 @@
 
   const ADMIN_HEADER = [
     "participant_id", "order_position", "repeat", "condition", "ear", "language",
-    "lists", "SRT20_dB", "SRT30_dB", "slope30", "fit30_converged", "n_obs30",
+    "lists", "SRT20_dB", "slope20", "fit20_converged", "n_obs20",
+    "SRT30_dB", "slope30", "fit30_converged", "n_obs30",
     "start_level_dB", "start_unit", "input_mode", "ref_threshold_HL", "best_BC_HL",
     "masker_ear", "masker_offset_dB", "manual_masker_dB", "masker_tracks_PL",
     "phoneme_count", "PTA_dB", "take", "is_current", "timestamp"
@@ -319,6 +320,9 @@
       pid, admin.position, admin.repeat, admin.condition, admin.ear, admin.language,
       admin.lists.join("+"),
       srt20 != null ? srt20.toFixed(2) : "",
+      fit20 && fit20.slope != null ? fit20.slope.toFixed(5) : "",
+      fit20 ? (fit20.converged ? 1 : 0) : "",
+      fit20 ? fit20.n : "",
       srt30 != null ? srt30.toFixed(2) : "",
       summary && summary.slope != null ? summary.slope.toFixed(5) : "",
       summary ? (summary.fitConverged ? 1 : 0) : "",

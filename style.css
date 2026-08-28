@@ -1182,3 +1182,10 @@ details summary {
 .experiment-row-aborted .experiment-mark { font-weight: 700; }
 .experiment-row:hover { background: #f1f5f9; }
 .experiment-row-current { background: #eef6ff; }
+
+/* Anonymiser modals */
+.convert-backup-modal, .passphrase-modal {
+  border: 1px solid var(--line); border-radius: 10px; padding: 1.25rem 1.4rem;
+  max-width: 40rem; box-shadow: 0 10px 40px rgba(0,0,0,.18);
+}
+.convert-backup-modal::backdrop, .passphrase-modal::backdrop { background: rgba(0,0,0,.35); }

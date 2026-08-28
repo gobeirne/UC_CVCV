@@ -40,7 +40,7 @@
               </div>
               <div class="grid two">
                 <label>Client name <input id="clientName" autocomplete="name" placeholder="Full name"></label>
-                <label>NHI / ID <input id="clientId" placeholder="NHI number"></label>
+                <label>Identifier <input id="clientId" placeholder="ID"></label>
                 <label>Date of birth <input id="clientDob" type="date"></label>
                 <label>Test date <input id="sessionDate" type="date"></label>
               </div>
@@ -97,7 +97,7 @@
                 <label>Transducer
                   <select id="transducer">
                     <option value="insert earphones">Insert earphones</option>
-                    <option value="headphones">Headphones</option>
+                    <option value="headphones">Supra-aural headphones</option>
                     <option value="airpods">AirPods / earbuds</option>
                     <option value="sound field speaker">Sound field speaker</option>
                     <option value="bone conductor">Bone conductor</option>
@@ -455,6 +455,8 @@
             <h3>Exports</h3>
             <div class="actions stack">
               <button id="downloadJsonBtn" type="button" class="secondary">Download JSON</button>
+              <button id="emailAnonBtn" type="button" class="secondary">Email anonymised results</button>
+              <button id="convertBackupBtn" type="button" class="secondary">Convert email backup…</button>
               <button id="downloadTsvBtn" type="button" class="secondary">Download TSV</button>
               <button id="copyTsvBtn" type="button" class="secondary">Copy TSV</button>
               <button id="reportBtn" type="button" class="secondary">Report / print PDF</button>
@@ -522,10 +524,25 @@
         </label>
       </div>
       <p id="calEarHint" class="hint" style="font-size:.8rem"></p>
-      <label>
+      <label id="calLevelSingleWrap">
         <span id="calLevelLabelText">Audiometer dial setting, dB(A)</span>
         <input id="calLevelInput" type="number" step="5" inputmode="decimal">
       </label>
+      <div id="calDialDualWrap" style="display:none">
+        <p class="hint" style="font-size:.8rem;margin:.2rem 0">
+          Set each audiometer channel's dial and zero it to VU 0 off the tone. Give an
+          ear more headroom (a higher dial) if its loss needs it — the software uses each
+          side's dial for that ear.
+        </p>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:.6rem">
+          <label>Left dial, dB(A)
+            <input id="calDialLeft" type="number" step="5" inputmode="decimal">
+          </label>
+          <label>Right dial, dB(A)
+            <input id="calDialRight" type="number" step="5" inputmode="decimal">
+          </label>
+        </div>
+      </div>
       <p id="calLevelHint" class="hint"></p>
       <p id="calDialogStatus" class="status"></p>
       <menu>
@@ -770,6 +787,8 @@
   </style>
 
   <script src="config.js"></script>
+  <script src="sessions.js"></script>
+  <script src="anonymiser.js"></script>
   <script src="adaptive.js"></script>
   <script src="app.js"></script>
   <script src="experiment_allocation.js"></script>

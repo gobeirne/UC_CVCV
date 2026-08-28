@@ -258,7 +258,8 @@ const V_EQ = { "a":"a","aː":"a","e":"e","eː":"e","i":"i","iː":"i","o":"o","o�
 const state = {
   language: "maori",
   client: {},
-  calibration: { method: null, measuredDbA: null, timestamp: null, isCalibrated: false, sliderMinDb: -100, sliderMaxDb: 0, currentSliderDb: 0, strandedLists: 0 },
+  sessionId: null,   // id of the current session in the keyed store (Sessions.js)
+  calibration: { method: null, measuredDbA: null, dial: { left: null, right: null }, timestamp: null, isCalibrated: false, sliderMinDb: -100, sliderMaxDb: 0, currentSliderDb: 0, strandedLists: 0 },
   // Gain adjustment (signed dB) applied to every file played from sounds_cvc/.
   // Default -5.07 dB matches the CVC recordings being that much hotter than the
   // CVCV set; changing it is a deliberate, confirmed action (see the setting).
@@ -396,16 +397,46 @@ function lessLevelAdvice() {
 // levels anyone presents. Raise it only if the source material's bit depth does.
 const MAX_ATTENUATION_DB = 96;
 
+// ── Per-ear calibration reference ─────────────────────────────────────────
+// Audiometer calibration has an independent dial per channel (A/B → left/right),
+// so a clinician can give one ear more headroom for asymmetric losses. The
+// reference for a given ear is:
+//   • audiometer: calibration.dial[ear] if set, else the shared measuredDbA
+//   • sound-field: the single measuredDbA (one speaker/meter for both)
+// currentStimEarSide() maps the routing selector to "left"/"right"; binaural or
+// unknown falls back to whichever dial is set (or the shared value).
+function currentStimEarSide() {
+  const v = $("stimEar") ? $("stimEar").value : "";
+  if (v === "left" || v === "right") return v;
+  return null;   // binaural / soundfield / unset
+}
+function referenceDbA(ear) {
+  const cal = state.calibration;
+  if (!cal || !cal.isCalibrated) return null;
+  if (calMethod() === "audiometer" && cal.dial && typeof cal.dial === "object") {
+    const has = (v) => v !== null && v !== undefined && v !== "" && Number.isFinite(Number(v));
+    const side = (ear === "left" || ear === "right") ? ear : currentStimEarSide();
+    if (side && has(cal.dial[side])) return Number(cal.dial[side]);
+    // No dial for this side yet: fall back to the other side, then shared value.
+    const other = side === "left" ? "right" : "left";
+    if (has(cal.dial[other])) return Number(cal.dial[other]);
+  }
+  return cal.measuredDbA === null ? null : Number(cal.measuredDbA);
+}
+// The reference in effect for the current routing — used by the gain path.
+function currentReferenceDbA() { return referenceDbA(currentStimEarSide()); }
+
 // The ONLY floor on presentation level is the recording's dynamic range: below
 // reference − MAX_ATTENUATION_DB you are digging into quantisation noise. There
 // is no floor at 0 dB(A). Negative dB(A)/dB SPL are perfectly valid — they are
 // simply pressures below the 20 µPa reference (a normal threshold at 2–4 kHz is
 // itself below 0 dB SPL). Both audiometer and sound-field modes are bounded only
-// by attenuation.
-function levelBounds() {
+// by attenuation. Optionally scoped to a specific ear's dial.
+function levelBounds(ear) {
   const cal = state.calibration;
-  if (!cal.isCalibrated || cal.measuredDbA === null) return null;
-  const reference = Number(cal.measuredDbA);
+  if (!cal.isCalibrated) return null;
+  const reference = referenceDbA(ear);
+  if (reference === null) return null;
   // Levels live on a 5 dB grid: round the ceiling DOWN and the floor UP so
   // every selectable position is genuinely inside the bounds.
   const max = Math.floor(reference / 5) * 5;
@@ -428,6 +459,13 @@ function clampLevel(value) {
 
 // Masker shares the reference with the stimulus — same gain path.
 function maskerLevel() { return clampLevel($("maskLevel") ? $("maskLevel").value : 0); }
+
+// The ear the masker is routed to ("left"/"right"), or null for binaural/off —
+// used to pick that ear's calibration reference for the masker gain.
+function maskEarSide() {
+  const v = $("maskEar") ? $("maskEar").value : "";
+  return (v === "left" || v === "right") ? v : null;
+}
 
 /* ── Masker noise-vs-tone correction ──────────────────────────────────────
    With tone-referenced audiometer calibration (both channels zeroed to the 1 kHz
@@ -484,6 +522,21 @@ function combinedClippingRisk() {
 
 // Single owner of the calibration status line, so range/method/stranded notes
 // don't overwrite each other.
+// Human-readable summary of the calibration reference(s), for status text and
+// the exported report. Audiometer shows both dials (or one if only one is set);
+// sound-field shows the single measured SPL.
+function referenceSummary() {
+  const cal = state.calibration;
+  if (!cal || !cal.isCalibrated) return "not set";
+  if (cal.method === "audiometer" && cal.dial &&
+      (cal.dial.left != null || cal.dial.right != null)) {
+    const l = cal.dial.left != null ? `L ${cal.dial.left}` : "L —";
+    const r = cal.dial.right != null ? `R ${cal.dial.right}` : "R —";
+    return `${l} / ${r} dB(A)`;
+  }
+  return cal.measuredDbA != null ? `${cal.measuredDbA} dB(A)` : "not set";
+}
+
 function renderCalStatus() {
   const el = $("calStatus");
   if (!el) return;
@@ -533,6 +586,24 @@ function reconcileQueueLevels() {
   return stranded;
 }
 
+// A compact snapshot of the presentation setup in force RIGHT NOW, stamped onto
+// each recorded result so a session that spans a mid-test dial change (or a
+// routing/transducer change) stays correctly interpretable. Never rewritten:
+// once a result carries a stamp, that stamp is the truth of how it was presented.
+function presentationSetupStamp() {
+  const cal = state.calibration || {};
+  return {
+    method: cal.method || null,
+    referenceDbA: currentReferenceDbA(),                 // the ear-correct reference used
+    dial: cal.dial ? { left: cal.dial.left, right: cal.dial.right } : null,
+    measuredDbA: cal.measuredDbA ?? null,
+    stimEar: $("stimEar") ? $("stimEar").value : null,   // stimulus routing
+    presentationCondition: $("presentationCondition") ? $("presentationCondition").value : null,
+    maskEar: $("maskEar") ? $("maskEar").value : null,
+    transducer: $("transducer") ? $("transducer").value : null
+  };
+}
+
 function conditionSymbol(condition) {
   return { left: "×", right: "○", binaural: "B", soundfield: "S", aided: "A", unaided: "U" }[condition] || "?";
 }
@@ -546,6 +617,26 @@ function init() {
   repopulateListSelects();
   loadClinicSettings();
   loadCvcGainSetting();
+  // ── Multi-session store: register hooks, migrate any legacy draft, and flag
+  //    sessions left mid-test (browser closed) as [interrupted]. ──
+  if (window.Sessions) {
+    window.Sessions.register({
+      buildPayload: buildSessionPayload,
+      applyPayload: applySessionPayload,
+      describe: () => ({
+        client: {
+          name: state.client?.name || "", id: state.client?.id || "",
+          dob: state.client?.dob || "", date: state.client?.date || ""
+        },
+        resultCount: (state.results && state.results.length) || 0,
+        testInProgress: (Array.isArray(state.queue) &&
+          state.queue.some(q => q && q.status === "in-progress")) || !!state.adaptive
+      }),
+      onListChanged: () => renderRecentSessions()
+    });
+    window.Sessions.migrateLegacy("ucTeReoSpeechAudiometry");
+    window.Sessions.reconcileOnLoad(null);   // no current session yet this load
+  }
   loadDraftIntoForm();
   bindEvents();
   applyLanguageToUI();
@@ -703,6 +794,62 @@ function renderLogoPreview(dataUrl) {
   state.clinicLogo = dataUrl || null;
 }
 
+// Build the full serialisable session payload (used by saveSession and the
+// Sessions store hook). Pure snapshot of the current session state.
+function buildSessionPayload() {
+  return {
+    savedAt: new Date().toISOString(),
+    sessionId: state.sessionId,
+    language: state.language,
+    randomiseOverride: state.randomiseOverride,
+    client: state.client,
+    participant: state.participant,          // per-ear audiogram/PTA/start spec
+    experiment: state.experiment,            // experiment stepper + CSV stores
+    masking: state.masking,                  // IAA settings
+    calibration: state.calibration,
+    queue: state.queue,
+    currentListIndex: state.currentListIndex,
+    currentTrialIndex: state.currentTrialIndex,
+    currentTrials: state.currentTrials,
+    results: state.results,
+    dialectSubstitutions: state.dialectSubstitutions,
+    training: state.training,
+    testMode: state.testMode,
+    adaptiveForm: state.adaptiveForm,
+    adaptiveTracks: state.adaptiveTracks || [],
+    // Live adaptive engine, if a track is mid-flight, captured as its config +
+    // per-trial log so it can be replayed to the exact state on restore. The
+    // engine instance itself isn't serialisable; the replay is lossless for A1
+    // and, with the interleave persisted, for A2 too.
+    adaptiveLive: serialiseLiveAdaptive()
+  };
+}
+
+// Capture a live adaptive session as a replayable descriptor, or null if none.
+function serialiseLiveAdaptive() {
+  const a = state.adaptive;
+  if (!a || !a.session) return null;
+  const s = a.session;
+  return {
+    meta: {
+      procedure: s.procedure, startLevel: s.startLevel, nTrials: s.nTrials,
+      phonemeCount: s.phonemeCount, perUnitFloor: s.perUnitFloor,
+      bk: s.bk, pTargets: s.tracks.map(t => t.pTarget),
+      interleave: s.interleave.slice(), pos: s.pos
+    },
+    // The scored trials in presentation order: enough to replay record().
+    log: (s.log || []).map(e => ({
+      trackId: e.trackId, level: e.level, correct: e.correct, phonemes: e.phonemes
+    })),
+    // Non-session bookkeeping app.js keeps alongside the engine.
+    context: {
+      language: a.language, listNumbers: a.listNumbers, words: a.words,
+      maskerOffsetDb: a.maskerOffsetDb, startLevel: a.startLevel,
+      stimulusEar: a.stimulusEar, position: a.position
+    }
+  };
+}
+
 function saveSession() {
   // Always snapshot current form values so recent sessions reflect live state
   state.client = {
@@ -716,28 +863,11 @@ function saveSession() {
     notes:    $("sessionNotes")   ? $("sessionNotes").value.trim()   : (state.client?.notes    || "")
   };
 
-  const key = "ucTeReoSpeechAudiometry";
-  const payload = {
-    savedAt: new Date().toISOString(),
-    language: state.language,
-    randomiseOverride: state.randomiseOverride,
-    client: state.client,
-    calibration: state.calibration,
-    queue: state.queue,
-    currentListIndex: state.currentListIndex,
-    currentTrialIndex: state.currentTrialIndex,
-    currentTrials: state.currentTrials,
-    results: state.results,
-    dialectSubstitutions: state.dialectSubstitutions,
-    training: state.training,
-    testMode: state.testMode,
-    adaptiveForm: state.adaptiveForm,
-    // Finished adaptive tracks are summarised (engine instances aren't
-    // serialisable); the per-word data lives in `results`, tagged adaptive.
-    adaptiveTracks: state.adaptiveTracks || []
-  };
-  localStorage.setItem(key, JSON.stringify(payload));
-  renderRecentSessions();
+  // Ensure the session has an id (created lazily on first save of real content).
+  if (!state.sessionId && window.Sessions) state.sessionId = window.Sessions.newId();
+  if (window.Sessions && state.sessionId) {
+    window.Sessions.save(state.sessionId, "active");
+  }
 }
 
 function updateSetupResultsSummary() {
@@ -795,36 +925,49 @@ function openSavedJson(e) {
 function renderRecentSessions() {
   const list = $("recentSessionsList");
   const hint = $("noRecentHint");
-  if (!list) return;
-  const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
-  if (!saved) { if (hint) hint.style.display = ""; return; }
-  try {
-    const data = JSON.parse(saved);
-    if (!data.client) { if (hint) hint.style.display = ""; return; }
-    if (hint) hint.style.display = "none";
-    list.innerHTML = "";
+  if (!list || !window.Sessions) return;
+  const items = window.Sessions.list();
+  if (!items.length) { if (hint) hint.style.display = ""; list.innerHTML = ""; return; }
+  if (hint) hint.style.display = "none";
+  list.innerHTML = "";
+  for (const d of items) {
     const item = document.createElement("div");
     item.className = "recent-session-item";
-    const when = data.savedAt ? new Date(data.savedAt).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "short" }) : "earlier";
-    const resultCount = data.results?.length || 0;
+    const isCurrent = d.id === state.sessionId;
+    const when = d.savedAt ? new Date(d.savedAt).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "short" }) : "earlier";
+    const rc = d.resultCount || 0;
+    const name = (d.client && d.client.name) || "Unnamed client";
+    const tag = isCurrent
+      ? ` <span class="recent-tag current">(current session)</span>`
+      : (d.status === "interrupted"
+          ? ` <span class="recent-tag interrupted">[interrupted]</span>`
+          : "");
     item.innerHTML = `
       <div>
-        <div class="recent-session-name">${data.client.name || "Unnamed client"}</div>
-        <div class="recent-session-meta">${data.client.date || ""} · ${resultCount} trial${resultCount !== 1 ? "s" : ""} recorded · saved ${when}</div>
+        <div class="recent-session-name">${escapeHtml(name)}${tag}</div>
+        <div class="recent-session-meta">${(d.client && d.client.date) || ""} · ${rc} trial${rc !== 1 ? "s" : ""} · saved ${when}</div>
       </div>
-      <button class="recent-session-dismiss" title="Dismiss" type="button">×</button>
+      <button class="recent-session-dismiss" title="Remove from list" type="button">×</button>
     `;
     item.querySelector(".recent-session-dismiss").onclick = (e) => {
       e.stopPropagation();
-      localStorage.removeItem("ucTeReoSpeechAudiometry");
-      renderRecentSessions();
+      if (isCurrent) { alert("This is the current session — it can't be removed from the list while active."); return; }
+      if (confirm(`Remove ${name}'s session from the list? Its saved data will be deleted from this device.`)) {
+        window.Sessions.remove(d.id);
+      }
     };
     item.onclick = (e) => {
       if (e.target.classList.contains("recent-session-dismiss")) return;
-      restoreSession();
+      if (isCurrent) return;   // already loaded
+      restoreSession(d.id);
     };
     list.appendChild(item);
-  } catch { if (hint) hint.style.display = ""; }
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
 const SCREEN_SUBTITLES = {
@@ -860,67 +1003,100 @@ function readClientForm() {
 }
 
 function loadDraftIntoForm() {
-  const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
-  if (!saved) return;
-  try {
-    const parsed = JSON.parse(saved);
-    if (parsed.client) {
-      // Client fields — always load from saved
-      $("clientName").value = parsed.client.name || "";
-      $("clientId").value = parsed.client.id || "";
-      if ($("clientDob")) $("clientDob").value = parsed.client.dob || "";
-      $("sessionDate").value = parsed.client.date || $("sessionDate").value;
-      $("sessionNotes").value = parsed.client.notes || "";
-      // The mita/dialect map travels with the client, so restore it alongside
-      // the client fields — otherwise the notes could show a Mita/dialect line
-      // with no active substitutions behind it.
-      state.dialectSubstitutions = parsed.dialectSubstitutions || {};
-      // Clinician/role/facility loaded from clinic settings (device-persistent), not session
-    }
-  } catch {}
+  // With the multi-session store, the app no longer auto-loads a single draft on
+  // startup. A fresh load starts a clean session; previous work (including any
+  // [interrupted] session) is resumed explicitly from the Recent Sessions list.
+  // Clinician/role/facility come from device clinic settings, loaded separately.
 }
 
-function restoreSession() {
-  const saved = localStorage.getItem("ucTeReoSpeechAudiometry");
-  if (!saved) return;
+function restoreSession(id) {
+  if (!window.Sessions) return;
+  const payload = window.Sessions.loadPayload(id);
+  if (!payload) { alert("That session's data could not be found."); return; }
+
+  // Warn before leaving the current session. It's already a saved recent entry,
+  // so nothing is lost — but make the switch explicit.
+  const curHasContent = (state.results && state.results.length) ||
+    (state.queue && state.queue.length) || (state.client && state.client.name);
+  if (curHasContent) {
+    const target = (payload.client && payload.client.name) || "that session";
+    if (!confirm(`Load ${target}? This ends the current session. Your current work is ` +
+                 `saved and will remain in Recent Sessions.`)) return;
+    // Make sure the current session is persisted before we leave it.
+    if (state.sessionId) window.Sessions.save(state.sessionId, "clean");
+  }
+
+  applySessionPayload(payload);
+}
+
+// Restore full app state from a session payload (used by manual restore and by
+// crash recovery). Replays a live adaptive track to its exact pre-interruption
+// state where one was captured.
+function applySessionPayload(payload) {
   try {
-    const parsed = JSON.parse(saved);
-    Object.assign(state, parsed);
-    // A live adaptive engine can't be serialised, so a restored session never
-    // resumes a track mid-way: clear any live run and drop an incomplete
-    // synthetic adaptive queue item. Completed tracks live in adaptiveTracks.
-    state.adaptive = null;
+    const live = payload.adaptiveLive || null;
+    // Bulk-assign the serialisable state.
+    Object.assign(state, payload);
+    state.adaptive = null;   // will be rebuilt from `live` below if present
+
     if (!Array.isArray(state.adaptiveTracks)) state.adaptiveTracks = [];
     if (!state.adaptiveForm) state.adaptiveForm = { procedure: "A1", startLevel: 60, nTrials: 20, selectedLists: [] };
-    if (Array.isArray(state.queue)) {
-      state.queue = state.queue.filter(q => !(q && q.adaptive && q.status !== "complete"));
-    }
     if (!LANGUAGES[state.language]) state.language = "maori";
     if (!state.randomiseOverride || typeof state.randomiseOverride !== "object") {
       state.randomiseOverride = { maori: null, english: null };
     }
+    if (!state.dialectSubstitutions) state.dialectSubstitutions = {};
+
+    // Rebuild a live adaptive track, if one was in progress, by replaying its log.
+    let resumedTrack = false;
+    if (live && window.Adaptive && typeof window.Adaptive.replaySession === "function") {
+      const session = window.Adaptive.replaySession(live);
+      if (session) {
+        state.adaptive = Object.assign({}, live.context, { session });
+        resumedTrack = true;
+      }
+    } else if (Array.isArray(state.queue)) {
+      // No live engine captured: drop any incomplete adaptive queue item.
+      state.queue = state.queue.filter(q => !(q && q.adaptive && q.status !== "complete"));
+    }
+
     applyLanguageToUI();
-    // Repopulate client fields
-    if (parsed.client) {
-      $("clientName").value = parsed.client.name || "";
-      $("clientId").value = parsed.client.id || "";
-      if ($("clientDob")) $("clientDob").value = parsed.client.dob || "";
-      $("sessionDate").value = parsed.client.date || $("sessionDate").value;
-      $("sessionNotes").value = parsed.client.notes || "";
+    if (payload.client) {
+      $("clientName").value = payload.client.name || "";
+      $("clientId").value = payload.client.id || "";
+      if ($("clientDob")) $("clientDob").value = payload.client.dob || "";
+      $("sessionDate").value = payload.client.date || $("sessionDate").value;
+      $("sessionNotes").value = payload.client.notes || "";
     }
     setupCalibrationSlider();
-    if (state.calibration?.isCalibrated) $("testCalBtn").hidden = false;
-    syncMaskerControls();
+    if (state.calibration?.isCalibrated && $("testCalBtn")) $("testCalBtn").hidden = false;
+    if (typeof syncMaskerControls === "function") syncMaskerControls();
     renderQueue();
     refreshPI();
-    renderRecentSessions();
     updateSetupResultsSummary();
     updateTrainingBadge();
-    if (!state.dialectSubstitutions) state.dialectSubstitutions = {};
     updateClearClientBtn();
     applyAdaptiveFormToUI();
+    if (window.ParticipantInputs && window.ParticipantInputs.render) { try { window.ParticipantInputs.render(); } catch {} }
+    if (window.Experiment && window.Experiment.renderSection) { try { window.Experiment.renderSection(); } catch {} }
+    if (window.MaskingUI && window.MaskingUI.render) { try { window.MaskingUI.render(); } catch {} }
+
+    // Mark this the active session and re-save so its status is 'active' again.
+    if (window.Sessions && state.sessionId) window.Sessions.save(state.sessionId, "active");
+    renderRecentSessions();
     setTestMode(state.testMode || "fixed");
-  } catch { alert("Could not restore session — data may be corrupt."); }
+
+    if (resumedTrack) {
+      // Bring the clinician into the test screen ready to continue the track.
+      const s = state.adaptive.session;
+      const remaining = s.total - s.done;
+      alert(`Resumed the adaptive track — ${s.done} of ${s.total} words done, ` +
+            `${remaining} remaining. Continue from where it was interrupted.`);
+    }
+  } catch (e) {
+    console.error("[restore]", e);
+    alert("Could not restore session — data may be corrupt.");
+  }
 }
 
 function setupFastScoreButtons() {
@@ -1257,7 +1433,7 @@ function clearClient() {
     ($("clientId") && $("clientId").value.trim()) ||
     ($("clientDob") && $("clientDob").value);
   if (!hasAny) return;
-  if (!confirm("Clear the client name, NHI/ID and date of birth? This can't be undone.")) return;
+  if (!confirm("Clear the client name, identifier and date of birth? This can't be undone.")) return;
   if ($("clientName")) $("clientName").value = "";
   if ($("clientId")) $("clientId").value = "";
   if ($("clientDob")) $("clientDob").value = "";
@@ -1692,6 +1868,8 @@ function bindEvents() {
   $("confirmAbandonBtn").onclick = abandonList;
 
   $("downloadJsonBtn").onclick = downloadJson;
+  if ($("emailAnonBtn")) $("emailAnonBtn").onclick = exportAnonymisedResults;
+  if ($("convertBackupBtn")) $("convertBackupBtn").onclick = openConvertBackup;
   $("downloadTsvBtn").onclick = downloadTsv;
   if ($("copyTsvBtn")) $("copyTsvBtn").onclick = copyTsv;
   $("reportBtn").onclick = showReport;
@@ -2175,12 +2353,13 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
 // sounds_cvc/ pass -5.07 (via fileGainAdjustDb), so both the CVC words and the
 // CVC calibration tone play 5.07 dB below their raw level — landing them on the
 // same effective scale as CVCV and making the two tones meter identically.
-function gainForLevel(levelDbA, adjustDb = 0) {
+function gainForLevel(levelDbA, adjustDb = 0, ear = undefined) {
   const adj = Number(adjustDb) || 0;
-  if (state.calibration.isCalibrated && state.calibration.measuredDbA !== null) {
+  const reference = referenceDbA(ear);   // per-ear (audiometer) or shared (sound-field)
+  if (state.calibration.isCalibrated && reference !== null) {
     // Effective presented level is the displayed level plus the (signed) file
     // adjustment; attenuation is how far that sits below the unity reference.
-    const attenuation = Number(state.calibration.measuredDbA) - (Number(levelDbA) + adj);
+    const attenuation = reference - (Number(levelDbA) + adj);
     const gain = Math.pow(10, -attenuation / 20);
     if (gain > 1) {
       // The reference IS unity gain. Amplifying past it clips the sample and
@@ -2190,7 +2369,7 @@ function gainForLevel(levelDbA, adjustDb = 0) {
       // lower the gain, so it is never the cause; the base level is too high.
       console.error(
         `gainForLevel: ${levelDbA} dB(A) is above the calibration reference of ` +
-        `${state.calibration.measuredDbA} dB(A). Capped at unity — presented level ` +
+        `${reference} dB(A). Capped at unity — presented level ` +
         `is NOT the displayed level. To present higher, ${moreLevelAdvice()}.`
       );
       return 1;
@@ -2301,6 +2480,45 @@ function updateOutputLevelFromSlider() {
   saveSession();
 }
 
+// Apply a dual-dial audiometer calibration. left/right are the per-ear dial
+// settings (either may be null → falls back to the other ear at use time). The
+// slider bounds use the higher of the two references (the widest headroom); the
+// per-ear gain path picks the correct dial for each ear via referenceDbA().
+function applyCalibrationDials(left, right, timestamp = new Date().toISOString(), method) {
+  const vals = [left, right].filter(v => Number.isFinite(Number(v))).map(Number);
+  if (!vals.length) return false;
+  const representative = Math.max(...vals);
+
+  state.calibration.method = method || "audiometer";
+  state.calibration.dial = { left: Number.isFinite(Number(left)) ? Number(left) : null,
+                             right: Number.isFinite(Number(right)) ? Number(right) : null };
+  state.calibration.measuredDbA = representative;   // for slider bounds & displays
+  state.calibration.timestamp = timestamp;
+  state.calibration.isCalibrated = true;
+
+  const b = levelBounds();
+  if (!b || !b.usable) {
+    state.calibration.isCalibrated = false;
+    state.calibration.measuredDbA = null;
+    if ($("calStatus")) $("calStatus").textContent =
+      `Those dial settings don't give a usable range. Check the figures are the ` +
+      `audiometer dial settings in dB(A).`;
+    saveSession();
+    return false;
+  }
+  state.calibration.sliderMinDb = b.min;
+  state.calibration.sliderMaxDb = b.max;
+  state.calibration.currentSliderDb = b.max;
+  const slider = $("outputLevel");
+  if (slider) { slider.min = b.min; slider.max = b.max; slider.step = 5; slider.value = b.max; }
+  if ($("testCalBtn")) $("testCalBtn").hidden = false;
+  updateOutputLevelFromSlider();
+  reconcileQueueLevels();
+  renderCalStatus();
+  saveSession();
+  return true;
+}
+
 function applyCalibrationLevel(level, timestamp = new Date().toISOString(), method) {
   const reference = Number(level);
   if (!Number.isFinite(reference)) return false;
@@ -2357,10 +2575,16 @@ function offerStoredCalibration() {
   if (!saved) return;
   try {
     const data = JSON.parse(saved);
-    if (!data.level) return;
-    // data.method may be absent on calibrations saved before methods existed;
-    // calMethod() falls back to "audiometer".
-    const ok = applyCalibrationLevel(Number(data.level), data.timestamp, data.method);
+    // Dual-dial audiometer calibrations store {dial:{left,right}}; older/sound-field
+    // ones store {level}. Restore whichever is present.
+    let ok;
+    if (data.dial && (Number.isFinite(Number(data.dial.left)) || Number.isFinite(Number(data.dial.right)))) {
+      ok = applyCalibrationDials(data.dial.left, data.dial.right, data.timestamp, data.method || "audiometer");
+    } else if (data.level) {
+      ok = applyCalibrationLevel(Number(data.level), data.timestamp, data.method);
+    } else {
+      return;
+    }
     if (!ok) return;
     const when = data.timestamp
       ? new Date(data.timestamp).toLocaleString("en-NZ", { dateStyle: "short", timeStyle: "short" })
@@ -2505,12 +2729,25 @@ function renderCalMethodUI() {
         "so the software can place speech and masker correctly on either side."
       : "";
   }
+  // Audiometer mode uses two dials (one per channel/ear); sound-field uses the
+  // single measured SPL. Show whichever applies.
   // New (safer) audiometer scheme: the tone goes to BOTH channels and the
   // clinician zeroes A and B off it, so an ear-swap mid-test can never leave a
   // channel mis-referenced. Default the routing to binaural in every method.
   if ($("calEarSelect")) {
     $("calEarSelect").value = "binaural";
     setCalibrationEar("binaural");
+  }
+  const dual = $("calDialDualWrap"), single = $("calLevelSingleWrap");
+  if (dual && single) {
+    const isAud = sel === "audiometer";
+    dual.style.display = isAud ? "" : "none";
+    single.style.display = isAud ? "none" : "";
+    if (isAud) {
+      const d = state.calibration.dial || {};
+      if ($("calDialLeft"))  $("calDialLeft").value  = d.left  ?? (state.calibration.measuredDbA ?? "");
+      if ($("calDialRight")) $("calDialRight").value = d.right ?? (state.calibration.measuredDbA ?? "");
+    }
   }
 }
 
@@ -2635,6 +2872,28 @@ function calNoiseStatusText(ear) {
 
 function saveCalibrationDialog() {
   const method = $("calMethodSelect").value;
+
+  // Audiometer: two dials (one per ear). At least one must be set; a blank side
+  // falls back to the other at use time.
+  if (method === "audiometer") {
+    const lRaw = $("calDialLeft") ? $("calDialLeft").value : "";
+    const rRaw = $("calDialRight") ? $("calDialRight").value : "";
+    const lHas = lRaw !== "" && Number.isFinite(Number(lRaw));
+    const rHas = rRaw !== "" && Number.isFinite(Number(rRaw));
+    if (!lHas && !rHas) {
+      $("calDialogStatus").textContent = "Enter at least one dial setting before saving.";
+      return;
+    }
+    const ok = applyCalibrationDials(
+      lHas ? Number(lRaw) : null, rHas ? Number(rRaw) : null,
+      new Date().toISOString(), method);
+    if (!ok) { $("calDialogStatus").textContent = $("calStatus").textContent; return; }
+    localStorage.setItem("ucTeReoSpeechAudiometryCalibration",
+      JSON.stringify({ dial: state.calibration.dial, method, timestamp: state.calibration.timestamp }));
+    $("calibrationDialog").close();
+    return;
+  }
+
   const raw = $("calLevelInput").value;
   const level = Number(raw);
   if (raw === "" || !Number.isFinite(level)) {
@@ -3050,7 +3309,8 @@ function renderTrialNavigator() {
             score,
             percent: Math.round((score / targets.length) * 100),
             maskerLevelReport: $("maskEar").value === "off" ? "none" : maskerLevel(),
-            comment: $("trialComment").value.trim()
+            comment: $("trialComment").value.trim(),
+            presentationSetup: presentationSetupStamp()
           };
           const existingIdx = state.currentResultIndexByTrial[state.currentTrialIndex];
           if (Number.isFinite(existingIdx)) {
@@ -3389,7 +3649,7 @@ function syncMaskerControls() {
 function updateLiveMasker() {
   syncMaskerControls();
   if (state.audio.masker) {
-    state.audio.masker.gain.gain.value = gainForLevel(maskerLevel(), maskerNoiseAdjustDb());
+    state.audio.masker.gain.gain.value = gainForLevel(maskerLevel(), maskerNoiseAdjustDb(), maskEarSide());
     state.audio.masker.pan.pan.value = $("maskEar").value === "left" ? -1 : $("maskEar").value === "right" ? 1 : 0;
     if ($("maskEar").value === "off") stopMasker();
     else setMaskerIndicator(true);
@@ -3414,7 +3674,7 @@ async function startMasker() {
 
     source.buffer = buffer;
     source.loop = true;
-    gain.gain.value = gainForLevel(maskerLevel(), maskerNoiseAdjustDb());
+    gain.gain.value = gainForLevel(maskerLevel(), maskerNoiseAdjustDb(), maskEarSide());
     const maskEarVal = $("maskEar").value;
     // Same splitter/merger ear routing as the stimulus path, so the masker's
     // in-ear level matches its on-screen dB regardless of ear (no panner boost).
@@ -3652,6 +3912,7 @@ function advanceTrialNow(trial, q) {
     resultPayload.sourceList = (trial.sourceList != null) ? trial.sourceList : null;
     if (cur) { resultPayload.adaptiveTrack = cur.trackId; resultPayload.adaptivePTarget = cur.pTarget; }
   }
+  resultPayload.presentationSetup = presentationSetupStamp();
 
   const existingIdx = state.currentResultIndexByTrial[state.currentTrialIndex];
   if (Number.isFinite(existingIdx)) {
@@ -4118,10 +4379,9 @@ function safeName() {
   return (state.client.name || "client").replace(/[^\p{Letter}\p{Number}]+/gu, "_");
 }
 
-function autoSaveJson() {
-  // Silently trigger a JSON download so data is never lost on session end
+function buildExportPayload() {
   readClientForm();
-  const payload = {
+  return {
     exportedAt: new Date().toISOString(),
     app: "UC Speech Audiometry (Te reo Māori / NZ English)",
     activeLanguage: state.language,
@@ -4141,12 +4401,69 @@ function autoSaveJson() {
     results: state.results,
     summaries: listSummaries()
   };
-  const date = (state.client.date || new Date().toISOString().slice(0,10)).replace(/-/g,"");
-  download(`${safeName()}_${date}_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
+}
+
+function autoSaveJson() {
+  // Silently trigger a JSON download so data is never lost on session end
+  const payload = buildExportPayload();
+  const base = (window.Sessions && window.Sessions.fileBase)
+    ? window.Sessions.fileBase(state.client, payload.exportedAt)
+    : `${safeName()}_${(state.client.date||"").replace(/-/g,"")}`;
+  download(`${base}_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
+  // Exporting is a clean close point for this session.
+  if (window.Sessions && state.sessionId) window.Sessions.markClean(state.sessionId);
 }
 
 function downloadJson() {
   autoSaveJson();
+}
+
+// ── Anonymised export & backup conversion (anonymiser.js) ─────────────────
+function exportAnonymisedResults() {
+  if (!window.Anonymiser) { alert("Anonymiser unavailable."); return; }
+  window.Anonymiser.exportAnonymised(
+    buildExportPayload,
+    (client, iso) => (window.Sessions ? window.Sessions.fileBase(client, iso) : safeName())
+  );
+}
+
+function openConvertBackup() {
+  if (!window.Anonymiser) { alert("Anonymiser unavailable."); return; }
+  window.Anonymiser.openConvertModal(
+    (client, iso) => (window.Sessions ? window.Sessions.fileBase(client, iso) : "decoded"),
+    addDecodedToRecent
+  );
+}
+
+// Bridge for the Convert-backup modal: turn a decoded export payload into a new
+// entry in the keyed session store (for moving a client between devices). Does
+// NOT disturb the current session. Returns true on success.
+function addDecodedToRecent(decoded) {
+  if (!window.Sessions) return false;
+  try {
+    const id = window.Sessions.newId();
+    const payload = {
+      savedAt: new Date().toISOString(),
+      sessionId: id,
+      importedFrom: "email-backup",
+      language: decoded.activeLanguage || "maori",
+      client: decoded.client || {},
+      calibration: decoded.calibration || {},
+      queue: decoded.queue || [],
+      results: decoded.results || [],
+      dialectSubstitutions: decoded.dialectSubstitutions || {}
+    };
+    window.Sessions.saveImported(id, payload, {
+      client: {
+        name: payload.client.name || "", id: payload.client.id || "",
+        dob: payload.client.dob || "", date: payload.client.date || ""
+      },
+      resultCount: payload.results.length,
+      testInProgress: false
+    });
+    renderRecentSessions();
+    return true;
+  } catch (e) { console.error("[import] addDecodedToRecent:", e); return false; }
 }
 
 function buildTsv() {
@@ -4159,7 +4476,7 @@ function buildTsv() {
     ["Clinician", state.client.clinician || ""],
     ["Notes", state.client.notes || ""],
     ["Calibration method", state.calibration?.isCalibrated ? calMethodInfo().label : "uncalibrated"],
-    ["Calibration reference dB(A)", state.calibration?.isCalibrated ? state.calibration.measuredDbA : "not set"],
+    ["Calibration reference dB(A)", referenceSummary()],
     ["Presentation range dB(A)", (() => { const b = levelBounds(); return b && b.usable ? `${b.min}–${b.max}` : "—"; })()],
     ["Calibration time", state.calibration?.timestamp || "—"],
     ["Default presentation condition", $("presentationCondition") ? conditionLabel($("presentationCondition").value) : ""],
@@ -4498,7 +4815,7 @@ function showReport() {
     <div class="report-grid">
       <div>
         <p><b>Client:</b> ${state.client.name || ""}</p>
-        <p><b>NHI / ID:</b> ${state.client.id || ""}</p>
+        <p><b>Identifier:</b> ${state.client.id || ""}</p>
         <p><b>Date of birth:</b> ${state.client.dob || ""}</p>
         <p><b>Date:</b> ${state.client.date || ""}</p>
       </div>
@@ -4506,7 +4823,7 @@ function showReport() {
         <p><b>Clinician:</b> ${state.client.clinician || ""}${state.client.role ? " — " + state.client.role : ""}</p>
         <p><b>Facility:</b> ${state.client.facility || ""}</p>
         <p><b>Calibration:</b> ${state.calibration.isCalibrated
-          ? `${state.calibration.measuredDbA} dB(A) reference (${calMethodInfo().label})`
+          ? `${referenceSummary()} reference (${calMethodInfo().label})`
             + (() => { const b = levelBounds(); return b && b.usable ? `, presented ${b.min}–${b.max} dB(A)` : ""; })()
           : "not set"}</p>
         <p><b>Notes:</b> ${state.client.notes || ""}</p>
@@ -4757,7 +5074,7 @@ function applyAdaptiveMaskerLevel() {
   const target = clampLevel(q.levelDbA - a.maskerOffsetDb);
   if ($("maskLevel")) $("maskLevel").value = target;
   if ($("maskLevelLive")) $("maskLevelLive").value = target;
-  if (state.audio.masker) state.audio.masker.gain.gain.value = gainForLevel(target, maskerNoiseAdjustDb());
+  if (state.audio.masker) state.audio.masker.gain.gain.value = gainForLevel(target, maskerNoiseAdjustDb(), maskEarSide());
 }
 
 // Build a readable transcription of what the clinician entered for a word.
