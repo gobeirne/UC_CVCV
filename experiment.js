@@ -285,7 +285,7 @@
     "SRT30_dB", "slope30", "fit30_converged", "n_obs30",
     "start_level_dB", "start_unit", "input_mode", "ref_threshold_HL", "best_BC_HL",
     "masker_ear", "masker_offset_dB", "manual_masker_dB", "masker_tracks_PL",
-    "phoneme_count", "PTA_dB", "take", "is_current", "timestamp"
+    "phoneme_count", "PTA_dB", "fourFA_dB", "take", "is_current", "timestamp"
   ];
   const TRIAL_HEADER = [
     "participant_id", "order_position", "repeat", "ear", "language",
@@ -337,7 +337,8 @@
       inp && inp.masker && inp.masker.level != null ? inp.masker.level : "",
       inp && inp.masker ? (inp.masker.track ? 1 : 0) : "",
       summary ? summary.phonemeCount : "",
-      "",                       // PTA_dB — nullable, merged later by participant_id
+      inp && inp.pta != null ? inp.pta : "",       // PTA_dB — from PTA input mode
+      inp && inp.fourfa != null ? inp.fourfa : "",  // fourFA_dB — from 4FA input mode
       take,                     // take number (1 = first; higher = repeat/replace)
       1,                        // is_current — this newest take supersedes earlier ones
       summary ? summary.timestamp : new Date().toISOString()
