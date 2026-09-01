@@ -252,24 +252,24 @@
         the audiogram (UC protocol) and stay editable throughout. Off by default —
         turning both on adds noticeably to session time.
       </p>
-      <div class="grid" style="gap:.4rem">
+      <div style="display:flex;flex-direction:column;gap:.35rem">
         ${LANGS.map(l => `
-          <label style="display:flex;align-items:flex-start;gap:.4rem;font-weight:normal">
+          <label style="display:flex;align-items:flex-start;gap:.5rem;font-weight:normal;cursor:pointer">
             <input type="checkbox" id="naInclude_${l.key}" ${conf.include[l.key] ? "checked" : ""}
-                   style="margin-top:.2rem">
-            <span>Include 3 non-adaptive ${l.label}
+                   style="flex:0 0 auto;margin:.15rem 0 0 0">
+            <span style="flex:1 1 auto">Include 3 non-adaptive ${l.label}
               ${l.caveat ? `<br><span class="hint" style="color:var(--warn,#b45309)">${l.caveat}</span>` : ""}
             </span>
           </label>`).join("")}
       </div>
-      <div class="grid two" style="gap:.5rem;margin-top:.5rem;align-items:end">
-        <label>Placement
-          <select id="naPlacement">
+      <div style="margin-top:.6rem;max-width:24rem">
+        <label style="display:block">Placement
+          <select id="naPlacement" style="width:100%">
             <option value="end" ${conf.placement === "end" ? "selected" : ""}>Block of three at the end (default)</option>
             <option value="shuffled" ${conf.placement === "shuffled" ? "selected" : ""}>Shuffled into the run</option>
           </select>
         </label>
-        <div class="hint" id="naPlacementHint"></div>
+        <div class="hint" id="naPlacementHint" style="margin-top:.25rem"></div>
       </div>
       <div id="naPreview" class="hint" style="margin-top:.5rem"></div>`;
     host.appendChild(wrap);

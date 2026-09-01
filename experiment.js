@@ -160,7 +160,10 @@
     return admins[xs.position] || null;   // position is 0-based index
   }
 
-  function startParticipant(participant) {
+  // Set up a participant WITHOUT launching the first modal. Populates the status
+  // array and renders the sequence table so the clinician can review it first.
+  // Pass { run: true } to begin the run immediately (legacy behaviour).
+  function loadParticipant(participant, opts) {
     const xs = xstate();
     const admins = adminsFor(participant);
     xs.participant = participant;
@@ -175,10 +178,15 @@
       xs.status = admins ? admins.map(() => "pending") : [];
       xs.statusParticipant = participant;
     }
+    // A change of participant invalidates any prepared non-adaptive slots.
+    xs.naSlots = null; xs.naRunning = null;
     if (typeof global.saveSession === "function") global.saveSession();
     renderSection();
-    goToNextPending();
+    if (opts && opts.run) goToNextPending();
   }
+
+  // Kept for callers that want the old "set up and immediately run" behaviour.
+  function startParticipant(participant) { loadParticipant(participant, { run: true }); }
 
   // Index of the first pending position, or -1 if none remain.
   function nextPendingIndex() {
@@ -622,17 +630,19 @@
     section.innerHTML = `
       <h2>Experiment structure</h2>
       <p class="hint" id="experimentIntro">
-        Thesis mode. Choosing a participant runs the frozen 12-position allocation
-        (2 ears × 2 languages × 3 repeats). Each position is one A1 track of 30
-        words; the SRT is recorded at both 20 and 30 words. The dictated fields
-        above are locked while a participant is selected.
+        Thesis mode. Choosing a participant shows the frozen 12-position allocation
+        (2 ears × 2 languages × 3 repeats) below for review — it does not start
+        testing. Each position is one A1 track of 30 words; the SRT is recorded at
+        both 20 and 30 words. Press <b>Start testing</b> (or click the first row)
+        to begin. The dictated fields above are locked while a participant is
+        selected.
       </p>
       <div class="grid three">
         <label>Participant
           <select id="experimentParticipant"></select>
         </label>
         <div style="align-self:end">
-          <button type="button" id="experimentStartBtn" class="secondary">Start / restart participant</button>
+          <button type="button" id="experimentStartBtn" class="secondary">Start testing</button>
         </div>
         <div style="align-self:end">
           <button type="button" id="experimentClearBtn" class="secondary">Clear (unlock fields)</button>
@@ -657,21 +667,37 @@
       Array.from({ length: participantCount() }, (_, i) =>
         `<option value="${i + 1}">Participant ${i + 1}</option>`).join("");
 
+    // Selecting a participant loads their sequence for REVIEW — it populates the
+    // table below without launching into the first administration. The clinician
+    // starts the run explicitly (Start button, or by clicking a row).
+    sel.onchange = () => {
+      const p = Number(sel.value);
+      const xs = xstate();
+      if (!p) { clearParticipant(); return; }
+      const switching = xs.participant && xs.participant !== p;
+      if (switching && Array.isArray(xs.status) && xs.status.some(s => s !== "pending") &&
+          !confirm(`Switch to participant ${p}? The current participant's progress ` +
+                   `markers are cleared (data already written to CSV is kept).`)) {
+        sel.value = String(xs.participant);   // revert the dropdown
+        return;
+      }
+      loadParticipant(p, { run: false });
+    };
+
     // Wire buttons.
     section.querySelector("#experimentStartBtn").onclick = () => {
       const p = Number(sel.value);
       if (!p) { alert("Select a participant first."); return; }
       const xs = xstate();
-      const switching = xs.participant && xs.participant !== p;
-      const hasProgress = xs.participant === p && Array.isArray(xs.status) &&
-                          xs.status.some(s => s !== "pending");
+      // Make sure this participant is loaded (e.g. if the page was restored).
+      if (xs.participant !== p) loadParticipant(p, { run: false });
+      const hasProgress = Array.isArray(xs.status) && xs.status.some(s => s !== "pending");
       if (hasProgress &&
-          !confirm(`Participant ${p} already has progress. Continue from the next ` +
+          !confirm(`Participant ${p} already has progress. Start from the next ` +
                    `unfinished position? (Completed positions keep their results; use ` +
                    `the row clicks to repeat individual ones.)`)) return;
-      if (switching && !confirm(`Switch to participant ${p}? The current participant's ` +
-          `progress markers are cleared (data already written to CSV is kept).`)) return;
-      startParticipant(p);
+      // Begin the run from the first pending position.
+      goToNextPending();
     };
     section.querySelector("#experimentClearBtn").onclick = clearParticipant;
     section.querySelector("#experimentDownloadAdmin").onclick = downloadAdminCsv;
@@ -713,10 +739,13 @@
     const admins = adminsFor(xs.participant);
     const status = Array.isArray(xs.status) ? xs.status : admins.map(() => "pending");
     const doneCount = status.filter(s => s === "done").length;
+    const notStarted = doneCount === 0 && !xs.running;
     progress.innerHTML = `Participant <b>${xs.participant}</b> — ` +
       `<b>${doneCount}</b> of ${admins.length} done` +
       (doneCount === admins.length ? ` · <span class="experiment-done">complete</span>` : "") +
-      ` · <span class="hint">click any row to run, repeat or replace it</span>`;
+      ` · <span class="hint">${notStarted
+          ? "review the sequence below, then press Start testing or click the first row"
+          : "click any row to run, repeat or replace it"}</span>`;
 
     const rows = admins.map((a, i) => {
       const st = status[i] || "pending";
