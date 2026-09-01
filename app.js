@@ -3648,12 +3648,20 @@ function syncMaskerControls() {
 
 function updateLiveMasker() {
   syncMaskerControls();
+  const maskVal = $("maskEar").value;
   if (state.audio.masker) {
+    // Honour "off" FIRST. Previously the routing line ran before the off-check,
+    // so an "off" masker was momentarily re-routed binaurally (pan 0 = both
+    // channels) — pushing masker noise into the TEST-ear channel for a frame
+    // before it stopped. Stop first, route only when actually on.
+    if (maskVal === "off") { stopMasker(); saveSession(); return; }
     state.audio.masker.gain.gain.value = gainForLevel(maskerLevel(), maskerNoiseAdjustDb(), maskEarSide());
-    state.audio.masker.pan.pan.value = $("maskEar").value === "left" ? -1 : $("maskEar").value === "right" ? 1 : 0;
-    if ($("maskEar").value === "off") stopMasker();
-    else setMaskerIndicator(true);
-  } else if ($("maskEar").value !== "off" && $("screen-test").classList.contains("active")) {
+    // Route the masker to its ear only. A masker ear of exactly "left"/"right"
+    // maps to a single channel; never fall through to binaural here, or the
+    // masker would leak into the test-ear channel.
+    state.audio.masker.pan.pan.value = maskVal === "left" ? -1 : maskVal === "right" ? 1 : 0;
+    setMaskerIndicator(true);
+  } else if (maskVal !== "off" && $("screen-test").classList.contains("active")) {
     startMasker();
   }
   saveSession();
@@ -3987,6 +3995,20 @@ function finishListProceed() {
       return;
     }
   } else {
+    // If this was an experiment-driven non-adaptive comparison block, hand back to
+    // the harness to record it and advance to the next block / completion — don't
+    // drop to the setup screen (mirrors the adaptive summary hand-off).
+    const naExperiment = (typeof window !== "undefined" && window.Experiment &&
+      window.Experiment.isExperimentUnlocked && window.Experiment.isExperimentUnlocked() &&
+      state.experiment && state.experiment.naRunning &&
+      typeof window.Experiment.onNonAdaptiveFinished === "function" &&
+      state.queue.every(q => q.nonAdaptive));
+    if (naExperiment) {
+      updateSetupResultsSummary();
+      try { window.Experiment.onNonAdaptiveFinished(); }
+      catch (e) { console.error("[experiment] onNonAdaptiveFinished:", e); }
+      return;
+    }
     alert("All queued lists complete. Results are being saved automatically.");
     autoSaveJson();
   }
@@ -4976,6 +4998,14 @@ function updateAdaptiveListStatus() {
 
 // ── Starting an adaptive track ──
 function startAdaptiveTrack() {
+  // Re-entrancy guard: a live adaptive track must not be replaced by a second
+  // start (e.g. a stray "Start adaptive track" click, or a double-tap on the
+  // experiment Continue button). Without this, a second start wiped the running
+  // session and could record the same administration twice. If a track is
+  // genuinely in progress, ignore the start.
+  if (state.adaptive && state.adaptive.session && !state.adaptive.session.finished) {
+    return;
+  }
   readClientForm();
   readAdaptiveForm();
   const proc = state.adaptiveForm.procedure;
@@ -5230,10 +5260,25 @@ function finishAdaptiveTrack() {
   state.adaptiveTracks.push(summary);
 
   // Notify the optional experiment module that a track completed, so it can
-  // record the administration and advance the stepper. No-op when inactive.
+  // RECORD the administration. No-op when inactive.
+  //
+  // Ordering matters: recording must happen now (while state.adaptive still holds
+  // this track's log), but ADVANCING to the next position must wait until the
+  // clinician has dismissed the per-track summary dialog below. If we let the
+  // harness advance immediately (its old 50 ms timer), the next position's
+  // instruction modal opens ON TOP of this summary dialog; closing the summary
+  // then runs its own "return to setup" branch and yanks the clinician to the
+  // home screen between every administration (the reported fault). So in
+  // experiment mode we record here and defer the advance to the summary's close
+  // handler via a one-shot callback.
+  const experimentDriven = (typeof window !== "undefined" && window.Experiment &&
+      window.Experiment.isExperimentUnlocked && window.Experiment.isExperimentUnlocked() &&
+      state.experiment && state.experiment.running);
   if (typeof window !== "undefined" && window.Experiment &&
       typeof window.Experiment.onTrackFinished === "function") {
-    try { window.Experiment.onTrackFinished(summary); } catch (e) { console.error("[experiment] onTrackFinished:", e); }
+    try {
+      window.Experiment.onTrackFinished(summary, { deferAdvance: experimentDriven });
+    } catch (e) { console.error("[experiment] onTrackFinished:", e); }
   }
 
   renderAdaptiveViews();
@@ -5374,6 +5419,17 @@ function bindAdaptiveEvents() {
   if ($("adaptiveSummaryContinue")) $("adaptiveSummaryContinue").onclick = () => {
     $("adaptiveSummaryDialog").close();
     updateSetupResultsSummary();
+    // In experiment mode the harness owns navigation: closing the summary should
+    // advance to the NEXT administration's instruction modal, staying in the test
+    // flow — NOT drop back to the setup/home screen between every administration.
+    // finishAdaptiveTrack deferred the advance to us for exactly this reason.
+    const exp = (typeof window !== "undefined" && window.Experiment &&
+      window.Experiment.isExperimentUnlocked && window.Experiment.isExperimentUnlocked() &&
+      state.experiment && state.experiment.active);
+    if (exp && typeof window.Experiment.resumeAfterSummary === "function") {
+      window.Experiment.resumeAfterSummary();
+      return;
+    }
     show("screen-setup");
   };
 }
