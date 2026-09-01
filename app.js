@@ -897,29 +897,117 @@ function openSavedJson(e) {
     try {
       const data = JSON.parse(ev.target.result);
       if (!data.results) { alert("This file doesn't appear to be a valid results JSON."); return; }
-      // Restore state from file
-      if (data.client)      state.client = data.client;
-      if (data.calibration) state.calibration = data.calibration;
-      if (data.queue)       state.queue = data.queue;
-      if (data.results)     state.results = data.results;
-      state.dialectSubstitutions = data.dialectSubstitutions || {};
-      if (data.language && LANGUAGES[data.language]) { state.language = data.language; applyLanguageToUI(); }
-      // Repopulate client fields
-      $("clientName").value = state.client?.name || "";
-      $("clientId").value   = state.client?.id   || "";
-      if ($("clientDob"))  $("clientDob").value  = state.client?.dob  || "";
-      $("sessionDate").value = state.client?.date || $("sessionDate").value;
-      $("sessionNotes").value = state.client?.notes || "";
-      renderQueue();
-      refreshPI();
-      updateSetupResultsSummary();
-      renderRecentSessions();
-      alert(`Loaded ${state.results.length} results for ${state.client?.name || "unknown client"}.`);
-    } catch { alert("Could not read file — it may be corrupt or the wrong format."); }
+
+      // Normalise the payload so the full restore path (applySessionPayload) can
+      // rebuild everything — completed adaptive tracks, an in-progress track, the
+      // PI plots, and the queue. Older exports (before the payload carried adaptive
+      // state) only have raw `results`; reconstruct what we can from those so the
+      // session no longer reopens blank.
+      const payload = Object.assign({}, data);
+
+      // Language: newer files use activeLanguage; older ones used `language`.
+      const lang = (data.activeLanguage && LANGUAGES[data.activeLanguage]) ? data.activeLanguage
+                 : (data.language && LANGUAGES[data.language]) ? data.language
+                 : null;
+      if (lang) payload.language = lang;
+
+      // If the file predates adaptiveTracks in the export, rebuild the finished
+      // tracks from the per-trial results so their SRTs and plots reappear.
+      if (!Array.isArray(payload.adaptiveTracks) || !payload.adaptiveTracks.length) {
+        const rebuilt = rebuildAdaptiveTracksFromResults(data.results);
+        if (rebuilt.length) payload.adaptiveTracks = rebuilt;
+      }
+      // These may be absent in old files; applySessionPayload guards for that.
+      if (!("adaptiveLive" in payload)) payload.adaptiveLive = null;
+      if (!payload.testMode) {
+        payload.testMode = data.results.some(r => r && r.adaptive) ? "adaptive" : "fixed";
+      }
+
+      applySessionPayload(payload);
+      const nTracks = Array.isArray(state.adaptiveTracks) ? state.adaptiveTracks.length : 0;
+      alert(`Loaded ${state.results.length} trial results` +
+            (nTracks ? ` and ${nTracks} adaptive track${nTracks === 1 ? "" : "s"}` : "") +
+            ` for ${state.client?.name || "unknown client"}.`);
+    } catch (err) {
+      console.error("[openSavedJson]", err);
+      alert("Could not read file — it may be corrupt or the wrong format.");
+    }
   };
   reader.readAsText(file);
   // Reset input so the same file can be re-opened
   e.target.value = "";
+}
+
+// Reconstruct finished adaptive-track summaries from raw per-trial results, for
+// files exported before the payload carried `adaptiveTracks`. Groups adaptive
+// trials by their track identity (language + condition + source-list set) and
+// fits each group's log with the Adaptive fitter so the SRT/slope/plot return.
+function rebuildAdaptiveTracksFromResults(results) {
+  if (!Array.isArray(results) || !window.Adaptive ||
+      typeof window.Adaptive.fitFromLog !== "function") return [];
+  const adaptive = results.filter(r => r && r.adaptive);
+  if (!adaptive.length) return [];
+
+  // Group key: the fields that actually distinguish one track from another —
+  // language, the list-set, and the ear. (An `adaptiveTrack` field exists but in
+  // practice is a constant per session, so it can't be used to separate tracks.)
+  // If a session ever does carry a genuinely varying track id, prefer it.
+  const trackIds = new Set(adaptive.map(r => String(r.adaptiveTrack)));
+  const useTrackId = trackIds.size > 1;
+  const groups = new Map();
+  adaptive.forEach(r => {
+    const key = useTrackId
+      ? `t${r.adaptiveTrack}`
+      : `${r.language || "maori"}|${r.listNumber || ""}|${r.stimulusEar || r.presentationCondition || ""}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  });
+
+  const tracks = [];
+  groups.forEach((rows, key) => {
+    // Preserve presentation order.
+    rows.sort((a, b) => (a.trialOrder || 0) - (b.trialOrder || 0));
+    const log = rows.map((r, i) => {
+      const level = Number(r.listLevelDbA);
+      const phonemes = Number(r.phonemeCount);
+      const correct = Number(r.score);
+      return {
+        order: i + 1,
+        trackId: 1,                                    // A1 is single-track
+        word: r.presentedWord,
+        sourceList: r.sourceList != null ? r.sourceList : null,
+        level,
+        correct,
+        phonemes,
+        result: phonemes ? (correct / phonemes) : 0,   // proportion, for the % column
+        transcription: r.comment || null
+      };
+    }).filter(e => Number.isFinite(e.level) && Number.isFinite(e.phonemes) && e.phonemes > 0);
+    if (log.length < 2) return;
+
+    let fit = null;
+    try { fit = window.Adaptive.fitFromLog(log); } catch { fit = null; }
+    const first = rows[0];
+    tracks.push({
+      language: first.language || "maori",
+      procedure: first.adaptiveProcedure || "A1",
+      stimulusEar: first.stimulusEar || first.presentationCondition || "",
+      condition: first.presentationCondition || first.stimulusEar || "",
+      listNumbers: String(first.listNumber || "").split("+").map(n => Number(n)).filter(Boolean),
+      maskerEar: first.maskerEar || "",
+      srt: fit ? fit.srt : null,
+      slope: fit ? fit.slope : null,
+      fitConverged: fit ? !!fit.converged : false,
+      nObservations: log.reduce((s, e) => s + (e.phonemes || 0), 0),
+      nTrials: log.length,
+      phonemeCount: first.phonemeCount || (first.language === "english" ? 3 : 4),
+      startLevel: first.adaptiveStartLevel != null ? first.adaptiveStartLevel : null,
+      timestamp: first.timestamp || new Date().toISOString(),
+      log,
+      reconstructed: true   // flag: rebuilt from raw trials, not the live engine
+    });
+  });
+  return tracks;
 }
 
 function renderRecentSessions() {
@@ -2290,6 +2378,19 @@ function makeEarRouter(ctx, inputNode, ear) {
   return {
     _apply: apply,
     setEar: apply,
+    // Tear down the whole routing subgraph. MediaElement/BufferSource nodes and
+    // their routers stay live (and keep summing into ctx.destination) until every
+    // node in the chain is disconnected; over a long session that accumulation is
+    // what degrades playback into stutter/drop-outs. Callers invoke this when a
+    // stimulus ends or is stopped.
+    disconnect() {
+      try { inputNode.disconnect(stereoize); } catch {}
+      try { stereoize.disconnect(); } catch {}
+      try { splitter.disconnect(); } catch {}
+      try { leftGain.disconnect(); } catch {}
+      try { rightGain.disconnect(); } catch {}
+      try { merger.disconnect(); } catch {}
+    },
     get pan() {
       return {
         get value() {
@@ -2332,6 +2433,7 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
     setStimulusIndicator(true);
     el.addEventListener("ended", () => {
       state.audio.activeStimuli = state.audio.activeStimuli.filter(x => x !== node);
+      teardownStimulusNode(node);
       if (!state.audio.activeStimuli.length) setStimulusIndicator(false);
     }, { once: true });
   } else {
@@ -2344,6 +2446,29 @@ function createRoutedAudio(url, ear, levelDbA, loop=false) {
     });
   }
   return node;
+}
+
+// Disconnect and release every Web-Audio node a stimulus created. A
+// MediaElementAudioSourceNode stays connected to the graph (and keeps summing
+// into ctx.destination) until explicitly disconnected, and cannot be
+// garbage-collected while connected — so without this, each played word left a
+// live source→gain→router→destination chain behind. Hundreds of these over a
+// session progressively load the audio thread and cause the drop-outs/static
+// that worsen as testing goes on. Safe to call more than once.
+function teardownStimulusNode(node) {
+  if (!node || node._torndown) return;
+  node._torndown = true;
+  try { node.source && node.source.disconnect(); } catch {}
+  try { node.gain && node.gain.disconnect(); } catch {}
+  try { node.pan && typeof node.pan.disconnect === "function" && node.pan.disconnect(); } catch {}
+  try {
+    if (node.el) {
+      node.el.pause();
+      node.el.removeAttribute("src");
+      // Release the decoded media so the element and its source node can be GC'd.
+      try { node.el.load(); } catch {}
+    }
+  } catch {}
 }
 
 // adjustDb is a SIGNED gain adjustment (dB) applied on top of the level→gain
@@ -2970,6 +3095,9 @@ function stopCurrentStimulusIfAny() {
       node.el.pause();
       node.el.currentTime = 0;
     } catch {}
+    // Release the graph immediately — an interrupted word (replay, advance to the
+    // next trial) would otherwise leak its nodes exactly like a completed one.
+    teardownStimulusNode(node);
   }
   state.audio.activeStimuli = [];
   setStimulusIndicator(false);
@@ -3710,10 +3838,16 @@ function stopMasker() {
   if (state.audio.masker) {
     if (state.audio.masker.isBufferLoop) {
       try { state.audio.masker.bufferSource.stop(); } catch {}
+      try { state.audio.masker.bufferSource.disconnect(); } catch {}
     } else if (state.audio.masker.el) {
       state.audio.masker.el.pause();
       state.audio.masker.el.currentTime = 0;
+      try { state.audio.masker.el.removeAttribute("src"); state.audio.masker.el.load(); } catch {}
     }
+    // Release the masker's gain + ear-router subgraph too (it restarts each
+    // position; without this the routers accumulate across a session).
+    try { state.audio.masker.gain && state.audio.masker.gain.disconnect(); } catch {}
+    try { state.audio.masker.pan && typeof state.audio.masker.pan.disconnect === "function" && state.audio.masker.pan.disconnect(); } catch {}
     state.audio.masker = null;
   }
   $("toggleMaskBtn").textContent = "Start masker";
@@ -4122,7 +4256,10 @@ function listSummaries() {
 // Which languages have fixed-level (non-adaptive) results. Adaptive tracks
 // get their own report sections, so they don't drive the per-language blocks.
 function languagesWithResults() {
-  const set = new Set(state.results.filter(r => !r.adaptive).map(r => r.language || "maori"));
+  // Count ALL results (adaptive and fixed). Previously this filtered to !r.adaptive,
+  // so a purely adaptive session exported languagesPresent: [] — which made the
+  // reopened file look empty.
+  const set = new Set((state.results || []).map(r => r.language || "maori"));
   return ["maori", "english"].filter(k => set.has(k));
 }
 
@@ -4407,6 +4544,10 @@ function buildExportPayload() {
     exportedAt: new Date().toISOString(),
     app: "UC Speech Audiometry (Te reo Māori / NZ English)",
     activeLanguage: state.language,
+    // Also emit `language` (the key the importer historically read). Keeping both
+    // means new files load in old builds and vice-versa. The importer now prefers
+    // activeLanguage and falls back to language.
+    language: state.language,
     languagesPresent: languagesWithResults(),
     client: state.client,
     setup: {
@@ -4421,7 +4562,22 @@ function buildExportPayload() {
     queue: state.queue,
     dialectSubstitutions: state.dialectSubstitutions,
     results: state.results,
-    summaries: listSummaries()
+    summaries: listSummaries(),
+    // Full session state so a reopened file restores the adaptive tracks (the
+    // fitted SRTs and plots) AND any track that was mid-flight — i.e. "where I was
+    // up to". Previously the export dropped these, so an adaptive session looked
+    // empty on reload even though every trial was in `results`. Mirrors the
+    // localStorage crash-recovery snapshot.
+    testMode: state.testMode,
+    adaptiveForm: state.adaptiveForm,
+    currentListIndex: state.currentListIndex,
+    currentTrialIndex: state.currentTrialIndex,
+    currentTrials: state.currentTrials,
+    adaptiveTracks: state.adaptiveTracks || [],
+    adaptiveLive: serialiseLiveAdaptive(),
+    // Thesis-mode harness state, when present, so a reopened experiment file shows
+    // the same progress and accumulated CSVs.
+    experiment: state.experiment || null
   };
 }
 
