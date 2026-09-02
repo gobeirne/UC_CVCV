@@ -1182,6 +1182,11 @@ details summary {
 .experiment-row-aborted .experiment-mark { font-weight: 700; }
 .experiment-row:hover { background: #f1f5f9; }
 .experiment-row-current { background: #eef6ff; }
+/* Non-adaptive comparison rows: tinted + left accent so they read as a distinct
+   arm within the same sequence. */
+.experiment-row-na { background: #fbf7ef; }
+.experiment-row-na td:first-child { box-shadow: inset 3px 0 0 #d9a441; font-weight: 600; }
+.experiment-row-na:hover { background: #f7efe0; }
 
 /* Anonymiser modals */
 .convert-backup-modal, .passphrase-modal {

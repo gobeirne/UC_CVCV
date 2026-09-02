@@ -43,21 +43,41 @@
     { key: "maori",   label: "CVCV (te reo Māori)", listMax: 10,
       caveat: "No CVCV list-equivalence has been established — for timing/exploration only." }
   ];
+  const EARS = [
+    { key: "left",     short: "L",   label: "Left" },
+    { key: "right",    short: "R",   label: "Right" },
+    { key: "binaural", short: "Bin", label: "Binaural" }
+  ];
 
   // ── Settings, persisted on state so they survive a reload ───────────────
+  // Model: per language, a per-ear on/off map. A language contributes a
+  // non-adaptive block for each ear that is ticked. Left and Right default ON,
+  // Binaural OFF; the language master tickbox turns the whole language on/off and
+  // reflects whether any ear is selected.
+  function defaultEars(on) { return { left: on, right: on, binaural: false }; }
   function cfg() {
     const s = global.state || (global.state = {});
     if (!s.nonAdaptive) {
       s.nonAdaptive = {
-        include: { english: false, maori: false },  // both OFF by default
+        // Master on/off per language — both OFF by default (session time).
+        include: { english: false, maori: false },
+        // Which ears to run for each language when it's on. L+R on by default.
+        ears: { english: defaultEars(true), maori: defaultEars(true) },
         placement: "end",                           // "end" | "shuffled"
         nLists: 3,
-        // Per language, per ear: the three proposed levels + masker, and the
-        // chosen candidate lists. Filled lazily when the block is prepared.
         plan: {}                                     // plan[lang][ear] = {...}
       };
     }
+    // Back-compat / integrity: ensure the ears map exists.
+    if (!s.nonAdaptive.ears) s.nonAdaptive.ears = { english: defaultEars(true), maori: defaultEars(true) };
+    LANGS.forEach(l => { if (!s.nonAdaptive.ears[l.key]) s.nonAdaptive.ears[l.key] = defaultEars(true); });
     return s.nonAdaptive;
+  }
+
+  // Ears selected for a language (only meaningful when the language is included).
+  function earsFor(language) {
+    const e = cfg().ears[language] || {};
+    return EARS.filter(x => e[x.key]).map(x => x.key);
   }
 
   // ── Level proposal (UC PI-max / HPL protocol) ───────────────────────────
@@ -225,15 +245,27 @@
 
   // ── Public: is any non-adaptive block requested? ────────────────────────
   function anyIncluded() {
-    const c = cfg().include;
-    return !!(c.english || c.maori);
+    return LANGS.some(l => cfg().include[l.key] && earsFor(l.key).length);
   }
   function includedLanguages() {
-    const c = cfg().include;
-    return LANGS.filter(l => c[l.key]).map(l => l.key);
+    return LANGS.filter(l => cfg().include[l.key] && earsFor(l.key).length).map(l => l.key);
   }
 
-  // ── UI: inject the tickboxes + placement + preview into the experiment card
+  // Ask the experiment harness to rebuild its sequence table (the non-adaptive
+  // rows are appended there). Safe no-op if the harness isn't present.
+  function refreshExperimentTable() {
+    if (global.Experiment && typeof global.Experiment.renderSection === "function") {
+      try { global.Experiment.renderSection(); } catch {}
+    }
+  }
+
+  // ── UI: inject the tickboxes + placement into the experiment card ───────
+  // Checkbox styling note: the global stylesheet sets `input { width:100%;
+  // padding:.6rem }`, which stretches bare checkboxes across the row and shoves
+  // their labels away. Every checkbox here therefore explicitly resets width,
+  // min-width, padding and margin so it renders as a normal small box beside its
+  // text.
+  const CB = 'style="width:auto;min-width:0;flex:0 0 auto;padding:0;margin:0"';
   function ensureUI() {
     if ($("nonAdaptivePanel")) return;
     const host = $("experimentSection");
@@ -246,86 +278,101 @@
     wrap.style.borderTop = "1px solid var(--line)";
     wrap.innerHTML = `
       <h3 style="margin:.2rem 0 .4rem;font-size:.95rem">Non-adaptive comparison lists <span class="hint" style="font-weight:normal">(optional)</span></h3>
-      <p class="hint" id="naIntro" style="margin:.2rem 0 .5rem">
-        Adds a block of three fixed-level lists per selected language, for the
-        conventional PI-function comparison. Levels and masking are proposed from
-        the audiogram (UC protocol) and stay editable throughout. Off by default —
-        turning both on adds noticeably to session time.
+      <p class="hint" id="naIntro" style="margin:.2rem 0 .6rem">
+        Adds fixed-level lists per selected language/ear for the conventional
+        PI-function comparison; they appear as extra positions in the sequence
+        above. Levels and masking are proposed from the audiogram (UC protocol)
+        and stay editable throughout. Off by default — each ear added lengthens
+        the session.
       </p>
-      <div style="display:flex;flex-direction:column;gap:.35rem">
+      <div style="display:flex;flex-direction:column;gap:.6rem">
         ${LANGS.map(l => `
-          <label style="display:flex;align-items:flex-start;gap:.5rem;font-weight:normal;cursor:pointer">
-            <input type="checkbox" id="naInclude_${l.key}" ${conf.include[l.key] ? "checked" : ""}
-                   style="flex:0 0 auto;margin:.15rem 0 0 0">
-            <span style="flex:1 1 auto">Include 3 non-adaptive ${l.label}
-              ${l.caveat ? `<br><span class="hint" style="color:var(--warn,#b45309)">${l.caveat}</span>` : ""}
-            </span>
-          </label>`).join("")}
+          <div style="display:flex;flex-direction:column;gap:.25rem">
+            <label style="display:flex;align-items:center;gap:.5rem;font-weight:600;margin:0;cursor:pointer">
+              <input type="checkbox" id="naInclude_${l.key}" ${conf.include[l.key] ? "checked" : ""} ${CB}>
+              <span>Include non-adaptive ${l.label}</span>
+            </label>
+            <div id="naEars_${l.key}" style="display:flex;gap:1rem;padding-left:1.6rem;${conf.include[l.key] ? "" : "opacity:.45;pointer-events:none"}">
+              ${EARS.map(e => `
+                <label style="display:flex;align-items:center;gap:.35rem;font-weight:normal;margin:0;cursor:pointer">
+                  <input type="checkbox" id="naEar_${l.key}_${e.key}" ${conf.ears[l.key][e.key] ? "checked" : ""} ${CB}>
+                  <span>${e.label}</span>
+                </label>`).join("")}
+            </div>
+            ${l.caveat ? `<div class="hint" style="padding-left:1.6rem;color:var(--warn,#b45309)">${l.caveat}</div>` : ""}
+          </div>`).join("")}
       </div>
-      <div style="margin-top:.6rem;max-width:24rem">
-        <label style="display:block">Placement
+      <div style="margin-top:.7rem;max-width:24rem">
+        <label style="display:block;margin:0 0 .2rem">Placement
           <select id="naPlacement" style="width:100%">
-            <option value="end" ${conf.placement === "end" ? "selected" : ""}>Block of three at the end (default)</option>
+            <option value="end" ${conf.placement === "end" ? "selected" : ""}>Block at the end (default)</option>
             <option value="shuffled" ${conf.placement === "shuffled" ? "selected" : ""}>Shuffled into the run</option>
           </select>
         </label>
         <div class="hint" id="naPlacementHint" style="margin-top:.25rem"></div>
       </div>
-      <div id="naPreview" class="hint" style="margin-top:.5rem"></div>`;
+      <div id="naSummary" class="hint" style="margin-top:.5rem"></div>`;
     host.appendChild(wrap);
 
     LANGS.forEach(l => {
-      const cb = $("naInclude_" + l.key);
-      if (cb) cb.addEventListener("change", () => {
-        cfg().include[l.key] = cb.checked;
-        if (typeof global.saveSession === "function") global.saveSession();
-        renderPreview();
+      const master = $("naInclude_" + l.key);
+      if (master) master.addEventListener("change", () => {
+        cfg().include[l.key] = master.checked;
+        // Ghost/enable the ear row.
+        const earRow = $("naEars_" + l.key);
+        if (earRow) {
+          earRow.style.opacity = master.checked ? "" : ".45";
+          earRow.style.pointerEvents = master.checked ? "" : "none";
+        }
+        persistAndRefresh();
+      });
+      EARS.forEach(e => {
+        const cb = $(`naEar_${l.key}_${e.key}`);
+        if (cb) cb.addEventListener("change", () => {
+          cfg().ears[l.key][e.key] = cb.checked;
+          persistAndRefresh();
+        });
       });
     });
     const pl = $("naPlacement");
-    if (pl) pl.addEventListener("change", () => {
-      cfg().placement = pl.value;
-      if (typeof global.saveSession === "function") global.saveSession();
-      renderPreview();
-    });
-    renderPreview();
+    if (pl) pl.addEventListener("change", () => { cfg().placement = pl.value; persistAndRefresh(); });
+
+    renderSummary();
   }
 
-  function renderPreview() {
-    const box = $("naPreview");
+  function persistAndRefresh() {
+    if (typeof global.saveSession === "function") global.saveSession();
+    renderSummary();
+    refreshExperimentTable();   // fold the change into the sequence table
+  }
+
+  // Short status line under the controls (the detailed per-position listing now
+  // lives in the sequence table itself).
+  function renderSummary() {
+    const box = $("naSummary");
     const hint = $("naPlacementHint");
-    if (!box) return;
     const conf = cfg();
     if (hint) {
       hint.textContent = conf.placement === "shuffled"
         ? "When shuffled earlier, list ranking uses only the adaptive data collected so far."
-        : "Runs after the 12 adaptive administrations, when all lists have been ranked.";
+        : "Runs after the adaptive administrations, when all lists have been ranked.";
     }
-    const langs = includedLanguages();
-    if (!langs.length) { box.innerHTML = "<em>No non-adaptive block — both boxes off.</em>"; return; }
-    // Preview uses the CURRENT participant + a representative ear if available.
-    const xs = global.state && global.state.experiment;
-    const participant = xs && xs.participant;
-    if (!participant) { box.innerHTML = "Select a participant to preview the proposed lists and levels."; return; }
-    const parts = langs.map(lang => {
-      const L = LANGS.find(x => x.key === lang);
-      // Preview both ears if the allocation tests both (it always does).
-      return ["left", "right"].map(ear => {
-        const cand = chooseCandidateLists(lang, ear, L.listMax, conf.nLists);
-        const prop = proposeLevels(ear);
-        const lv = prop.levels.map(v => v == null ? "—" : `${v}`).join(" / ");
-        const masker = proposeMasker(ear, prop.levels[0]);
-        const mtext = masker
-          ? (masker.needed ? `masker ${masker.level} dB → ${masker.maskEar}` : "no masking indicated")
-          : "masker: enter manually";
-        const warn = cand.thinData ? ` <span style="color:var(--warn,#b45309)">(ranked on limited data)</span>` : "";
-        return `<div style="margin:.15rem 0">
-          <b>${L.label}, ${ear} ear:</b> lists ${cand.lists.join(", ")} @ ${lv} dB(A)
-          <span class="hint">[${prop.source}]</span>; ${mtext}${warn}</div>`;
-      }).join("");
-    }).join("");
-    box.innerHTML = parts +
-      `<div class="hint" style="margin-top:.3rem">Levels and masking are seeds — adjust each list live from the queue as scores come in.</div>`;
+    if (!box) return;
+    const parts = [];
+    LANGS.forEach(l => {
+      if (!conf.include[l.key]) return;
+      const ears = earsFor(l.key);
+      if (ears.length) parts.push(`${l.label}: ${ears.map(e => EARS.find(x => x.key === e).short).join("/")}`);
+    });
+    const n = countBlocks();
+    box.innerHTML = parts.length
+      ? `Adding <b>${n}</b> non-adaptive ${n === 1 ? "block" : "blocks"} — ${parts.join("; ")}. They appear as extra positions in the sequence above.`
+      : "<em>No non-adaptive block — no ears selected.</em>";
+  }
+
+  // Total number of non-adaptive blocks currently requested (language × ear).
+  function countBlocks() {
+    return LANGS.reduce((n, l) => n + (cfg().include[l.key] ? earsFor(l.key).length : 0), 0);
   }
 
   // ── Public: enqueue the non-adaptive block(s) for the current ear/lang ──
@@ -363,8 +410,8 @@
   function init() { ensureUI(); }
 
   global.NonAdaptive = {
-    init, ensureUI, renderPreview,
-    anyIncluded, includedLanguages,
+    init, ensureUI, renderSummary,
+    anyIncluded, includedLanguages, earsFor, countBlocks,
     proposeLevels, proposeMasker, chooseCandidateLists, buildBlock, runBlock,
     cfg
   };

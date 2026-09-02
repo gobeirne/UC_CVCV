@@ -54,6 +54,73 @@
   }
   function participantCount() { return (global.EXPERIMENT_ALLOCATION || []).length; }
 
+  // ── Combined run sequence: adaptive admins + optional non-adaptive blocks ──
+  // The 12 frozen adaptive administrations, plus one entry per requested
+  // non-adaptive block (language × ear). Non-adaptive entries are admin-like so
+  // the table, status array, stepper and row-clicks treat them uniformly. Lists
+  // are left "TBD" until enough adaptive data exists to rank them (they're chosen
+  // at run time); the table shows TBD until then.
+  //
+  // Placement: "end" appends the non-adaptive block after all adaptive positions.
+  // "shuffled" interleaves each block at a stable pseudo-random point that is
+  // still AFTER that language's adaptive positions (so its lists can be ranked).
+  function nonAdaptiveEntries(participant) {
+    if (!global.NonAdaptive || !global.NonAdaptive.anyIncluded ||
+        !global.NonAdaptive.anyIncluded()) return [];
+    const langs = global.NonAdaptive.includedLanguages();
+    const out = [];
+    langs.forEach(language => {
+      global.NonAdaptive.earsFor(language).forEach(earKey => {
+        out.push({
+          kind: "nonadaptive",
+          language,
+          ear: earKey === "left" ? "L" : earKey === "right" ? "R" : "B",
+          earKey,                       // left | right | binaural
+          condition: earKey,
+          repeat: "",
+          lists: null,                  // resolved at run time → shown as TBD
+          position: null                // filled by sequenceFor as NA index
+        });
+      });
+    });
+    return out;
+  }
+
+  function sequenceFor(participant) {
+    const admins = adminsFor(participant);
+    if (!admins) return null;
+    const base = admins.map(a => Object.assign({ kind: "adaptive" }, a));
+    const na = nonAdaptiveEntries(participant);
+    if (!na.length) return base;
+
+    const placement = (global.NonAdaptive.cfg && global.NonAdaptive.cfg().placement) || "end";
+    na.forEach((e, i) => { e.naIndex = i + 1; });   // NA-1, NA-2 … for display/export
+
+    if (placement !== "shuffled") {
+      return base.concat(na);   // block at the end
+    }
+    // Shuffled: insert each block at a deterministic slot after the last adaptive
+    // position of its language (so its lists can be ranked from prior data). The
+    // offset is derived from participant+language+ear for stability across renders.
+    const seq = base.slice();
+    na.forEach(e => {
+      const lastLangPos = base.reduce((mx, a, idx) =>
+        (a.language === e.language ? idx : mx), -1);
+      const span = seq.length - (lastLangPos + 1);
+      const jitter = span > 0 ? (hashInt(`${participant}|${e.language}|${e.earKey}`) % (span + 1)) : 0;
+      const at = Math.min(seq.length, lastLangPos + 1 + jitter);
+      seq.splice(at, 0, e);
+    });
+    return seq;
+  }
+
+  // Small stable string hash for deterministic shuffled placement.
+  function hashInt(str) {
+    let h = 2166136261;
+    for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return Math.abs(h);
+  }
+
   // ── Module state (kept on the app's state so it survives session save) ──
   function xstate() {
     if (!global.state.experiment) {
@@ -155,9 +222,9 @@
   function currentAdmin() {
     const xs = xstate();
     if (!xs.participant) return null;
-    const admins = adminsFor(xs.participant);
-    if (!admins) return null;
-    return admins[xs.position] || null;   // position is 0-based index
+    const seq = sequenceFor(xs.participant);
+    if (!seq) return null;
+    return seq[xs.position] || null;   // position is 0-based index into the sequence
   }
 
   // Set up a participant WITHOUT launching the first modal. Populates the status
@@ -165,24 +232,35 @@
   // Pass { run: true } to begin the run immediately (legacy behaviour).
   function loadParticipant(participant, opts) {
     const xs = xstate();
-    const admins = adminsFor(participant);
+    const seq = sequenceFor(participant);
     xs.participant = participant;
     xs.position = 0;
     xs.running = false;
     xs.active = true;
-    // Per-position status: "pending" | "done" | "aborted". Authoritative for the
-    // playlist display and for finding the next thing to run. Preserved across a
-    // restart of the SAME participant so completed positions keep their ticks
-    // unless the clinician explicitly repeats them.
-    if (!Array.isArray(xs.status) || xs.statusParticipant !== participant) {
-      xs.status = admins ? admins.map(() => "pending") : [];
-      xs.statusParticipant = participant;
-    }
-    // A change of participant invalidates any prepared non-adaptive slots.
-    xs.naSlots = null; xs.naRunning = null;
+    // Per-position status: "pending" | "done" | "aborted", one per sequence entry.
+    // Preserved across a restart of the SAME participant so completed positions
+    // keep their ticks. Rebuilt if the sequence LENGTH changes (e.g. the clinician
+    // toggled a non-adaptive ear), preserving as many existing marks as possible.
+    resyncStatusToSequence(participant, seq);
+    xs.naRunning = null;
     if (typeof global.saveSession === "function") global.saveSession();
     renderSection();
     if (opts && opts.run) goToNextPending();
+  }
+
+  // Ensure xs.status has one entry per sequence position. Keeps existing marks by
+  // index for the adaptive positions (which never move); trailing non-adaptive
+  // positions default to pending. Called on load and whenever the sequence length
+  // changes because the non-adaptive selection changed.
+  function resyncStatusToSequence(participant, seq) {
+    const xs = xstate();
+    const n = seq ? seq.length : 0;
+    const fresh = xs.statusParticipant !== participant || !Array.isArray(xs.status);
+    const old = fresh ? [] : xs.status;
+    const next = [];
+    for (let i = 0; i < n; i++) next[i] = old[i] || "pending";
+    xs.status = next;
+    xs.statusParticipant = participant;
   }
 
   // Kept for callers that want the old "set up and immediately run" behaviour.
@@ -195,66 +273,31 @@
     return xs.status.findIndex(s => s === "pending");
   }
 
-  // Move to the next pending position and prompt it; if none, run any pending
-  // non-adaptive comparison block, and only then show completion.
+  // Move to the next pending position and prompt it (adaptive or non-adaptive);
+  // if none remain, show completion.
   function goToNextPending() {
     const xs = xstate();
     const idx = nextPendingIndex();
-    if (idx === -1) {
-      // Adaptive positions all done. Hand off to the non-adaptive block runner if
-      // any are requested and still pending; it returns true if it took over.
-      if (maybeRunNonAdaptive()) return;
-      xs.running = false; renderSection(); showComplete(); return;
-    }
+    if (idx === -1) { xs.running = false; renderSection(); showComplete(); return; }
     xs.position = idx;
     promptPosition(idx);
   }
 
-  // Build the ordered list of non-adaptive slots the clinician asked for (one per
-  // included language × tested ear), once, and cache it on xstate. Each slot is
-  // { language, ear, status }. Ears come from the participant's allocation so we
-  // only offer ears that were actually tested.
-  function ensureNonAdaptiveSlots() {
-    const xs = xstate();
-    if (Array.isArray(xs.naSlots)) return xs.naSlots;
-    const langs = (global.NonAdaptive && global.NonAdaptive.includedLanguages)
-      ? global.NonAdaptive.includedLanguages() : [];
-    const admins = adminsFor(xs.participant) || [];
-    const slots = [];
-    langs.forEach(lang => {
-      // Ears tested for this language in the allocation (usually both).
-      const ears = [...new Set(admins.filter(a => a.language === lang)
-        .map(a => a.ear === "L" ? "left" : "right"))];
-      ears.forEach(ear => slots.push({ language: lang, ear, status: "pending" }));
-    });
-    xs.naSlots = slots;
-    return slots;
-  }
-
-  // Run the next pending non-adaptive slot. Returns true if it launched one.
-  function maybeRunNonAdaptive() {
-    if (!global.NonAdaptive || !global.NonAdaptive.anyIncluded ||
-        !global.NonAdaptive.anyIncluded()) return false;
-    const xs = xstate();
-    const slots = ensureNonAdaptiveSlots();
-    const next = slots.find(s => s.status === "pending");
-    if (!next) return false;
-    xs.naRunning = next;
-    promptNonAdaptive(next);
-    return true;
-  }
-
   function langLabel(key) { return key === "maori" ? "te reo Māori (CVCV)" : "NZ English (CVC)"; }
+  function earPhrase(entry) {
+    return entry.earKey === "binaural" ? "binaurally"
+         : `in the ${entry.earKey || earWord(entry.ear)} ear`;
+  }
 
-  function promptNonAdaptive(slot) {
+  function promptNonAdaptive(entry) {
     const dlg = ensureModal();
     dlg.querySelector("#experimentModalTitle").textContent =
-      `Non-adaptive block — ${langLabel(slot.language)}, ${slot.ear} ear`;
+      `Non-adaptive block — ${langLabel(entry.language)}, ${entry.earKey} ear`;
     // Preview the lists/levels this block will use so the clinician can sanity-
     // check before starting; they remain editable in the queue once testing opens.
     let preview = "";
     try {
-      const b = global.NonAdaptive.buildBlock(slot.language, slot.ear);
+      const b = global.NonAdaptive.buildBlock(entry.language, entry.earKey);
       const lv = b.prop.levels.map(v => v == null ? "—" : v).join(" / ");
       const m = b.masker && b.masker.needed
         ? `Masker proposed at ${b.masker.level} dB to the ${b.masker.maskEar} ear.`
@@ -271,12 +314,12 @@
     if (typeof dlg.showModal === "function") dlg.showModal();
   }
 
-  function beginNonAdaptiveBlock(slot) {
+  function beginNonAdaptiveBlock(entry) {
     const xs = xstate();
-    xs.naRunning = slot;
+    xs.naRunning = entry;
     xs.running = true;   // reuse the running flag so row clicks are blocked
     if (global.NonAdaptive && typeof global.NonAdaptive.runBlock === "function") {
-      global.NonAdaptive.runBlock(slot.language, slot.ear);
+      global.NonAdaptive.runBlock(entry.language, entry.earKey);
     }
     // Hand to the app's normal fixed-mode test flow.
     if (typeof global.startTesting === "function") global.startTesting();
@@ -286,43 +329,47 @@
   // experiment mode. Records the block's trials, marks the slot done, advances.
   function onNonAdaptiveFinished() {
     const xs = xstate();
-    const slot = xs.naRunning;
-    if (!slot) return;
-    recordNonAdaptiveBlock(slot);
-    // Mark the matching slot done by value (language+ear), not object identity —
-    // a session restore reserialises naSlots and would otherwise leave it pending.
-    if (Array.isArray(xs.naSlots)) {
-      const s = xs.naSlots.find(x => x.language === slot.language && x.ear === slot.ear);
-      if (s) s.status = "done";
-    }
-    slot.status = "done";
+    const entry = xs.naRunning;
+    if (!entry) return;
+    recordNonAdaptiveBlock(entry);
+    // Mark this sequence position done by its index.
+    const idx = (entry._seqIndex != null) ? entry._seqIndex : xs.position;
+    if (Array.isArray(xs.status)) xs.status[idx] = "done";
     xs.naRunning = null;
     xs.running = false;
+    xs._finishingIdx = null;
     if (typeof global.saveSession === "function") global.saveSession();
     renderSection();
-    // Continue to the next non-adaptive slot, or completion.
-    setTimeout(() => { if (!maybeRunNonAdaptive()) { renderSection(); showComplete(); } }, 50);
+    // Advance to the next pending position (adaptive or non-adaptive), or finish.
+    setTimeout(() => { goToNextPending(); }, 50);
   }
 
-  // Run a SPECIFIC position (from a playlist click, or the linear flow). If it
+  // Run a SPECIFIC position (from a sequence-row click, or the linear flow). If it
   // already has data (done/aborted), running it again REPLACES that data — the
   // prior CSV rows are marked superseded so the analysis keeps every take but
   // knows which is current.
   function runPosition(idx) {
     const xs = xstate();
-    const admins = adminsFor(xs.participant);
-    if (!admins || idx < 0 || idx >= admins.length) return;
+    const seq = sequenceFor(xs.participant);
+    if (!seq || idx < 0 || idx >= seq.length) return;
     xs.position = idx;
     promptPosition(idx);
   }
 
   function promptPosition(idx) {
     const xs = xstate();
-    const admins = adminsFor(xs.participant);
-    if (!admins) return;
-    const admin = admins[idx];
-    applyAdminToForm(admin);
-    showInstructionModal(admin);
+    const seq = sequenceFor(xs.participant);
+    if (!seq) return;
+    const entry = seq[idx];
+    if (!entry) return;
+    if (entry.kind === "nonadaptive") {
+      entry._seqIndex = idx;
+      xs.naRunning = entry;
+      promptNonAdaptive(entry);
+      return;
+    }
+    applyAdminToForm(entry);
+    showInstructionModal(entry);
   }
 
   // Called by the app when a track finishes.
@@ -511,13 +558,13 @@
   // fixed-mode queue, so its per-word results live in state.results tagged
   // nonAdaptive. We emit one admin-style summary row per LIST (a conventional
   // fixed-level score: % correct at that list's level) plus the trial rows.
-  function recordNonAdaptiveBlock(slot) {
+  function recordNonAdaptiveBlock(entry) {
     ensureStores();
     const xs = xstate();
     const pid = xs.participant;
-    const lang = slot.language;
-    const ear = slot.ear;
-    const earCode = ear === "left" ? "L" : "R";
+    const lang = entry.language;
+    const ear = entry.earKey || (entry.ear === "L" ? "left" : entry.ear === "R" ? "right" : "binaural");
+    const earCode = ear === "left" ? "L" : ear === "right" ? "R" : "B";
     const results = Array.isArray(global.state.results) ? global.state.results : [];
     // This block's results: fixed (non-adaptive), matching language & ear, from
     // the lists this block queued. Identify by the nonAdaptive flag we set on the
@@ -632,10 +679,11 @@
       <p class="hint" id="experimentIntro">
         Thesis mode. Choosing a participant shows the frozen 12-position allocation
         (2 ears × 2 languages × 3 repeats) below for review — it does not start
-        testing. Each position is one A1 track of 30 words; the SRT is recorded at
-        both 20 and 30 words. Press <b>Start testing</b> (or click the first row)
-        to begin. The dictated fields above are locked while a participant is
-        selected.
+        testing. Any non-adaptive comparison blocks you tick below are added to the
+        same sequence (shown as NA-n rows). Each adaptive position is one A1 track
+        of 30 words; the SRT is recorded at both 20 and 30 words. Press
+        <b>Start testing</b> (or click a row) to begin. The dictated fields above
+        are locked while a participant is selected.
       </p>
       <div class="grid three">
         <label>Participant
@@ -736,31 +784,57 @@
       table.innerHTML = "";
       return;
     }
-    const admins = adminsFor(xs.participant);
-    const status = Array.isArray(xs.status) ? xs.status : admins.map(() => "pending");
+    // The combined run sequence (adaptive admins + any non-adaptive blocks).
+    const seq = sequenceFor(xs.participant) || [];
+    // Keep the status array the same length as the sequence — the non-adaptive
+    // selection can change between renders.
+    resyncStatusToSequence(xs.participant, seq);
+    const status = xs.status;
     const doneCount = status.filter(s => s === "done").length;
     const notStarted = doneCount === 0 && !xs.running;
+    const naCount = seq.filter(e => e.kind === "nonadaptive").length;
+    const naNote = naCount ? ` (incl. ${naCount} non-adaptive)` : "";
     progress.innerHTML = `Participant <b>${xs.participant}</b> — ` +
-      `<b>${doneCount}</b> of ${admins.length} done` +
-      (doneCount === admins.length ? ` · <span class="experiment-done">complete</span>` : "") +
+      `<b>${doneCount}</b> of ${seq.length}${naNote} done` +
+      (doneCount === seq.length ? ` · <span class="experiment-done">complete</span>` : "") +
       ` · <span class="hint">${notStarted
           ? "review the sequence below, then press Start testing or click the first row"
           : "click any row to run, repeat or replace it"}</span>`;
 
-    const rows = admins.map((a, i) => {
+    const rows = seq.map((a, i) => {
       const st = status[i] || "pending";
       const isCurrent = i === xs.position && xs.running;
-      const cls = st === "done" ? "experiment-row-done"
+      const na = a.kind === "nonadaptive";
+      const cls = (st === "done" ? "experiment-row-done"
                 : st === "aborted" ? "experiment-row-aborted"
-                : isCurrent ? "experiment-row-current" : "";
+                : isCurrent ? "experiment-row-current" : "") + (na ? " experiment-row-na" : "");
       const mark = st === "done" ? "✓" : st === "aborted" ? "✗" : isCurrent ? "▶" : "";
       const action = st === "done" ? "repeat" : st === "aborted" ? "retry" : "run";
+      // Position label: adaptive keeps its allocation number; non-adaptive shows
+      // NA-n so it's clearly the fixed-level comparison arm.
+      const posLabel = na ? `NA-${a.naIndex}` : a.position;
+      const repLabel = na ? "—" : `r${a.repeat}`;
+      const langLbl = a.language === "maori" ? "Māori" : "English";
+      const earLbl = na ? (a.earKey === "binaural" ? "bin" : a.earKey) : earWord(a.ear);
+      const kindLbl = na ? "fixed" : "adaptive";
+      // Lists: non-adaptive lists are chosen at run time from accumulated data, so
+      // show TBD until this block runs and its plan is filled.
+      let listsLbl;
+      if (na) {
+        const plan = global.NonAdaptive && global.NonAdaptive.cfg &&
+          global.NonAdaptive.cfg().plan && global.NonAdaptive.cfg().plan[a.language]
+          ? global.NonAdaptive.cfg().plan[a.language][a.earKey] : null;
+        listsLbl = (plan && plan.lists && plan.lists.length) ? plan.lists.join(", ") : "TBD";
+      } else {
+        listsLbl = a.lists.join(", ");
+      }
       return `<tr class="experiment-row ${cls}" data-idx="${i}" title="Click to ${action} this position" style="cursor:pointer">
-        <td style="padding:.2rem .4rem">${a.position}</td>
-        <td style="padding:.2rem .4rem">r${a.repeat}</td>
-        <td style="padding:.2rem .4rem">${a.language === "maori" ? "Māori" : "English"}</td>
-        <td style="padding:.2rem .4rem">${earWord(a.ear)}</td>
-        <td style="padding:.2rem .4rem">${a.lists.join(", ")}</td>
+        <td style="padding:.2rem .4rem">${posLabel}</td>
+        <td style="padding:.2rem .4rem">${repLabel}</td>
+        <td style="padding:.2rem .4rem">${langLbl}</td>
+        <td style="padding:.2rem .4rem">${earLbl}</td>
+        <td style="padding:.2rem .4rem">${kindLbl}</td>
+        <td style="padding:.2rem .4rem">${listsLbl}</td>
         <td style="padding:.2rem .4rem" class="experiment-mark">${mark}</td>
       </tr>`;
     }).join("");
@@ -768,6 +842,7 @@
       `<thead><tr style="text-align:left;border-bottom:1px solid var(--line)">
         <th style="padding:.2rem .4rem">#</th><th style="padding:.2rem .4rem">Rep</th>
         <th style="padding:.2rem .4rem">Lang</th><th style="padding:.2rem .4rem">Ear</th>
+        <th style="padding:.2rem .4rem">Type</th>
         <th style="padding:.2rem .4rem">Lists</th><th style="padding:.2rem .4rem"></th>
       </tr></thead><tbody>${rows}</tbody>`;
 
@@ -780,18 +855,20 @@
           alert("A track is currently running. Finish or abandon it before choosing another position.");
           return;
         }
+        const entry = seq[idx];
+        const label = entry.kind === "nonadaptive" ? `Non-adaptive block NA-${entry.naIndex}` : `Position ${entry.position}`;
         if (st !== "pending" &&
-            !confirm(`Position ${admins[idx].position} already has a result (${st}). ` +
+            !confirm(`${label} already has a result (${st}). ` +
                      `Run it again? The new take replaces the old as the current result ` +
                      `(the previous take is kept in the data, marked superseded).`)) return;
         runPosition(idx);
       };
     });
 
-    // Optional non-adaptive comparison block UI (tickboxes + preview). Rendered
-    // after the allocation table so it reads as an add-on to the run.
+    // Optional non-adaptive comparison controls (tickboxes + placement). Rendered
+    // after the sequence table so it reads as an add-on to the run.
     if (global.NonAdaptive) {
-      try { global.NonAdaptive.ensureUI(); global.NonAdaptive.renderPreview(); }
+      try { global.NonAdaptive.ensureUI(); global.NonAdaptive.renderSummary(); }
       catch (e) { console.error("[experiment] non-adaptive UI:", e); }
     }
   }
@@ -818,8 +895,10 @@
   }
   function showInstructionModal(admin) {
     const dlg = ensureModal();
+    const seq = sequenceFor(xstate().participant) || [];
+    const nAdaptive = seq.filter(e => e.kind !== "nonadaptive").length || 12;
     dlg.querySelector("#experimentModalTitle").textContent =
-      `Position ${admin.position} of 12 — repeat ${admin.repeat}`;
+      `Position ${admin.position} of ${nAdaptive} — repeat ${admin.repeat}`;
     dlg.querySelector("#experimentModalBody").textContent = instructionFor(admin);
     const go = dlg.querySelector("#experimentModalGo");
     go.textContent = "Continue";

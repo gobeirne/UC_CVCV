@@ -3,6 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Cache policy: always revalidate so a new deploy is picked up on a normal
+       reload, without needing "empty cache and hard reload". Combined with the
+       ?v= version query on each local asset below, this prevents stale JS/CSS. -->
+  <meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
   <title>UC Te Reo Māori Speech Audiometry</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="style.css">
@@ -786,16 +791,47 @@
     }
   </style>
 
-  <script src="config.js"></script>
-  <script src="sessions.js"></script>
-  <script src="anonymiser.js"></script>
-  <script src="adaptive.js"></script>
-  <script src="app.js"></script>
-  <script src="experiment_allocation.js"></script>
-  <script src="participant_inputs.js"></script>
-  <script src="masking.js"></script>
-  <script src="masking_ui.js"></script>
-  <script src="nonadaptive.js"></script>
-  <script src="experiment.js"></script>
+  <!-- ─────────────────────────────────────────────────────────────────────
+       Versioned asset loader (cache-busting).
+
+       Every local script and the stylesheet are loaded with a ?v=BUILD query.
+       Bump BUILD once per deploy (any new value works — a date-time stamp is
+       easy) and every client picks up ALL new files on their next normal reload,
+       with no "empty cache and hard reload" needed.
+
+       Scripts are loaded strictly in order to preserve dependencies (app.js and
+       the allocation must be present before experiment.js, etc.).
+       ───────────────────────────────────────────────────────────────────── -->
+  <script>
+    (function () {
+      // ⬇⬇⬇ THE ONE THING TO CHANGE PER RELEASE ⬇⬇⬇
+      var BUILD = "2026-09-01-4";
+      // ⬆⬆⬆ ------------------------------------ ⬆⬆⬆
+      window.__APP_BUILD__ = BUILD;
+
+      // Version the stylesheet too (swap the href for a ?v= copy).
+      var link = document.querySelector('link[rel="stylesheet"][href="style.css"]');
+      if (link) link.href = "style.css?v=" + BUILD;
+
+      var scripts = [
+        "config.js", "sessions.js", "anonymiser.js", "adaptive.js", "app.js",
+        "experiment_allocation.js", "participant_inputs.js", "masking.js",
+        "masking_ui.js", "nonadaptive.js", "experiment.js"
+      ];
+      // Load sequentially so execution order matches the old static tags exactly.
+      (function next(i) {
+        if (i >= scripts.length) return;
+        var s = document.createElement("script");
+        s.src = scripts[i] + "?v=" + BUILD;
+        s.async = false;
+        s.onload = function () { next(i + 1); };
+        s.onerror = function () {
+          console.error("Failed to load", s.src);
+          next(i + 1);   // continue so a single 404 doesn't halt the whole app
+        };
+        document.body.appendChild(s);
+      })(0);
+    })();
+  </script>
 </body>
 </html>
