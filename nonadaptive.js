@@ -212,31 +212,51 @@
   }
 
   // ── Build the fixed-level queue for one language block ──────────────────
-  // Returns an array of queue entries [{listNumber, levelDbA, language}] — three
-  // lists × the three proposed levels is NOT the intent; the convention is ONE
-  // level per list across the PI sweep (list A @ PI-max, list B @ mid, list C @
-  // HPL), which is how a conventional 3-point PI function is gathered. The
-  // clinician re-levels any list live via the normal queue editor.
+  // Returns an array of queue entries [{listNumber, levelDbA, language}]. One
+  // level per list across the PI sweep (a conventional 3-point PI function). The
+  // three lists are ALWAYS ordered loudest → middle → quietest, whatever order the
+  // candidate-list ranking produced and whether or not levels came from an
+  // audiogram (in the manual case the levels are blank but the loud→quiet slot
+  // labels still apply). The clinician can re-level any list live afterwards.
   function buildBlock(language, ear) {
     const conf = cfg();
     const L = LANGS.find(x => x.key === language);
     const cand = chooseCandidateLists(language, ear, L.listMax, conf.nLists);
     const prop = proposeLevels(ear);
-    const piMax = prop.levels[0];
+    // proposeLevels returns high→low; make that explicit and guaranteed here.
+    const orderedLevels = prop.levels.slice();          // [loud, mid, quiet]
+    const orderedLabels = ["loudest", "middle", "quietest"];
+    const piMax = orderedLevels[0];
     const masker = proposeMasker(ear, piMax);
-    const entries = cand.lists.map((listNumber, i) => ({
+    // Pair each candidate list with a loud→quiet slot, in order.
+    let entries = cand.lists.map((listNumber, i) => ({
       listNumber,
-      levelDbA: prop.levels[i] != null ? prop.levels[i] : "",
+      levelDbA: orderedLevels[i] != null ? orderedLevels[i] : "",
       language,
       nonAdaptive: true,
-      proposedLabel: prop.labels ? prop.labels[i] : null,
+      proposedLabel: orderedLabels[i] || null,
       maskerLevel: masker && masker.needed ? masker.level : null,
       maskEar: masker && masker.needed ? masker.maskEar : (ear === "left" ? "right" : "left")
     }));
-    // Stash the plan for display/export and so a re-render shows the same picks.
+    // Enforce loudest → middle → quietest on the actual stored order. When a level
+    // is blank (manual, no audiogram) it keeps its proposed slot; numeric levels
+    // sort strictly descending. Stable for equal/blank levels.
+    entries = entries
+      .map((e, idx) => ({ e, idx, lvl: (e.levelDbA === "" ? null : Number(e.levelDbA)) }))
+      .sort((a, b) => {
+        if (a.lvl == null && b.lvl == null) return a.idx - b.idx;   // keep slot order
+        if (a.lvl == null) return 1;    // unknown levels sink below known ones
+        if (b.lvl == null) return -1;
+        return b.lvl - a.lvl;           // loudest first
+      })
+      .map(({ e }, i) => Object.assign(e, { proposedLabel: orderedLabels[i] || e.proposedLabel }));
+    // Stash the plan in the FINAL presented order (loudest → quietest) so the
+    // table, CSV and queue all agree.
     conf.plan[language] = conf.plan[language] || {};
     conf.plan[language][ear] = {
-      lists: cand.lists, levels: prop.levels, levelSource: prop.source,
+      lists: entries.map(e => e.listNumber),
+      levels: entries.map(e => (e.levelDbA === "" ? null : Number(e.levelDbA))),
+      levelSource: prop.source,
       masker, thinData: cand.thinData, srtUsed: cand.srtUsed
     };
     if (typeof global.saveSession === "function") global.saveSession();
