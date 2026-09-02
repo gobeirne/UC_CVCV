@@ -277,6 +277,7 @@ const state = {
   targetSelections: [false,false,false,false],
   responseSelections: [null,null,null,null],
   _pendingAdvance: null,
+  awaitingListLevelConfirm: false,
   _advancing: false,
   // Per-language word-order override; null = use the language's default.
   randomiseOverride: { maori: null, english: null },
@@ -3333,10 +3334,93 @@ function beginCurrentList() {
   state.currentTrials = words.map((w, i) => ({ order: i + 1, word: w }));
   state.currentResultIndexByTrial = {};
   state.currentTrialIndex = 0;
+
+  // Non-adaptive lists: let the clinician set/confirm the presentation level (and
+  // masker) BEFORE the first word plays. Previously the first word auto-played at
+  // the proposed level before it could be changed. The prompt holds playback; on
+  // confirm it applies the level and plays the first word.
+  if (q.nonAdaptive) {
+    state.awaitingListLevelConfirm = true;
+    renderQueue();
+    renderTrial();          // paints the trial UI but auto-play is gated by the flag
+    promptListLevel(q);
+    saveSession();
+    return;
+  }
+
   renderQueue();
   renderTrial();
   startMaskerIfNeeded();
   saveSession();
+}
+
+// Pre-list level/masker confirmation for non-adaptive lists. Shows the proposed
+// level and masker, lets the clinician change them, and only then plays the first
+// word. Ordered loudest→middle→quietest across the block, so this is where the
+// clinician nudges an individual list (e.g. to chase a half-peak).
+function promptListLevel(q) {
+  let dlg = $("listLevelDialog");
+  if (!dlg) {
+    dlg = document.createElement("dialog");
+    dlg.id = "listLevelDialog";
+    dlg.className = "mita-dialog-card";
+    dlg.innerHTML = `
+      <div style="min-width:320px;max-width:420px">
+        <h3 id="listLevelTitle" style="margin:.2rem 0 .6rem">Set level for this list</h3>
+        <p class="hint" id="listLevelBlurb" style="margin:.2rem 0 .8rem"></p>
+        <div style="display:flex;flex-direction:column;gap:.6rem">
+          <label style="display:block;margin:0">Presentation level dB(A)
+            <input type="number" id="listLevelInput" step="5" style="width:100%">
+          </label>
+          <label style="display:block;margin:0">Masker level dB(A) <span class="hint">(blank = off)</span>
+            <input type="number" id="listMaskerInput" step="5" style="width:100%">
+          </label>
+        </div>
+        <div class="actions" style="margin-top:1rem;display:flex;gap:.5rem;justify-content:flex-end">
+          <button type="button" id="listLevelStart" class="primary">Start list</button>
+        </div>
+      </div>`;
+    document.body.appendChild(dlg);
+  }
+  const lvlInput = $("listLevelInput");
+  const maskInput = $("listMaskerInput");
+  const label = q.proposedLabel ? ` (${q.proposedLabel})` : "";
+  $("listLevelTitle").textContent = `List ${q.listNumber}${label} — set level`;
+  $("listLevelBlurb").textContent =
+    `Adjust the presentation level (and masker if needed) before the first word plays. ` +
+    `You can still change the level mid-list from the usual control.`;
+  lvlInput.value = (q.levelDbA === "" || q.levelDbA == null) ? "" : q.levelDbA;
+  // Seed masker from the live control (runBlock may have set it) or the queue item.
+  const currentMask = ($("maskEar") && $("maskEar").value !== "off" && $("maskLevel"))
+    ? $("maskLevel").value : (q.maskerLevel != null ? q.maskerLevel : "");
+  maskInput.value = currentMask;
+  lvlInput.focus?.();
+
+  const start = $("listLevelStart");
+  start.onclick = () => {
+    // Apply level.
+    const newLevel = clampLevel(Number(lvlInput.value));
+    if (Number.isFinite(newLevel)) q.levelDbA = newLevel;
+    // Apply masker: blank/empty => off; a number => on at that level to the
+    // non-test ear (the block already set maskEar; leave it if present).
+    if (maskInput.value === "" || maskInput.value == null) {
+      if ($("maskEar")) { $("maskEar").value = "off"; }
+    } else if ($("maskLevel") && $("maskEar")) {
+      $("maskLevel").value = clampLevel(Number(maskInput.value));
+      if ($("maskEar").value === "off") {
+        $("maskEar").value = q.maskEar || (($("stimEar") && $("stimEar").value === "left") ? "right" : "left");
+      }
+    }
+    if (typeof syncMaskerControls === "function") syncMaskerControls();
+    state.awaitingListLevelConfirm = false;
+    dlg.close();
+    // Now start the masker (if any) and play the first word.
+    renderQueue();
+    renderTrial();            // re-render with the applied level; auto-play now runs
+    startMaskerIfNeeded();
+    saveSession();
+  };
+  if (typeof dlg.showModal === "function") dlg.showModal();
 }
 
 function currentQueueItem() { return state.queue[state.currentListIndex]; }
@@ -3382,7 +3466,11 @@ function scheduleAutoplay() {
   const delay = needsMaskerLeadIn ? 3100 : 250;
   if (needsMaskerLeadIn) state.firstTrialMaskerPrimed = true;
 
+  // Hold the first word entirely if a pre-list level confirmation is pending
+  // (non-adaptive lists). Not scheduling avoids any race with the confirm handler.
+  if (state.awaitingListLevelConfirm) return;
   setTimeout(() => {
+    if (state.awaitingListLevelConfirm) return;
     if ($("screen-test").classList.contains("active")) playCurrent(true);
   }, delay);
 }
