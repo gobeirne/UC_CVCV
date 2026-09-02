@@ -774,6 +774,7 @@
       <div id="experimentProgress" class="hint" style="margin-top:.5rem"></div>
       <table id="experimentTable" class="experiment-table" style="margin-top:.6rem;width:100%;border-collapse:collapse;font-size:.82rem"></table>
       <div class="actions wrap" style="margin-top:.7rem">
+        <button type="button" id="experimentDownloadJson" class="secondary" style="font-size:.8rem">Download participant JSON (all data)</button>
         <button type="button" id="experimentDownloadAdmin" class="secondary" style="font-size:.8rem">Download administrations CSV</button>
         <button type="button" id="experimentDownloadTrial" class="secondary" style="font-size:.8rem">Download trials CSV</button>
       </div>
@@ -834,6 +835,14 @@
     section.querySelector("#experimentClearBtn").onclick = clearParticipant;
     section.querySelector("#experimentDownloadAdmin").onclick = downloadAdminCsv;
     section.querySelector("#experimentDownloadTrial").onclick = downloadTrialCsv;
+    const jsonBtn = section.querySelector("#experimentDownloadJson");
+    if (jsonBtn) jsonBtn.onclick = () => {
+      // One complete per-participant JSON: audiogram, adaptive tracks (with the
+      // full per-word logs → SRT@20/@30 are derivable), the experiment admin/trial
+      // CSVs, and the non-adaptive config. Reuses the app's standard exporter.
+      if (typeof global.downloadParticipantJson === "function") global.downloadParticipantJson();
+      else if (typeof global.autoSaveJson === "function") global.autoSaveJson();
+    };
     return section;
   }
 

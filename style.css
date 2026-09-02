@@ -1066,9 +1066,28 @@ details summary {
   border-top: 0;
 }
 
+/* Participant summary front page */
+.report-summary-page {
+  margin-top: 1rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid #d8d8d8;
+  border-radius: 8px;
+  background: #fbfbfc;
+}
+.report-summary-page h2 { margin-top: 0; }
+.report-summary-page .summary-stats ul { margin: .3rem 0 .3rem 1.1rem; }
+.report-summary-page .summary-stats li { margin: .15rem 0; }
+
 @media print {
   .report-lang-section {
     break-inside: avoid;
+  }
+  /* Summary leads the PDF; everything after starts on a fresh page. */
+  .report-summary-page {
+    break-after: page;
+    border: 0;
+    background: transparent;
+    padding: 0;
   }
 }
 

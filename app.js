@@ -4665,7 +4665,15 @@ function buildExportPayload() {
     adaptiveLive: serialiseLiveAdaptive(),
     // Thesis-mode harness state, when present, so a reopened experiment file shows
     // the same progress and accumulated CSVs.
-    experiment: state.experiment || null
+    experiment: state.experiment || null,
+    // Per-ear audiogram / PTA and derived inputs (state.participant holds the
+    // per-frequency AC/BC thresholds, PTA, 4FA, and masker settings each ear).
+    // The analysis plan needs PTA per ear as a continuous predictor, so this must
+    // travel with the results. Absent → the participant simply hasn't entered one.
+    participant: state.participant || null,
+    // Non-adaptive comparison configuration + per-block plan (lists/levels chosen),
+    // so a reopened file / analysis tool can see the fixed-level arm's setup.
+    nonAdaptive: state.nonAdaptive || null
   };
 }
 
@@ -4682,6 +4690,19 @@ function autoSaveJson() {
 
 function downloadJson() {
   autoSaveJson();
+}
+
+// One complete per-participant JSON bundle (experiment mode). Same payload as the
+// standard export — which now includes the audiogram, adaptive tracks with full
+// logs, the experiment admin/trial CSVs, and the non-adaptive config — but named
+// by participant so a folder of these drops straight into the analysis tool.
+function downloadParticipantJson() {
+  const payload = buildExportPayload();
+  const pid = (state.experiment && state.experiment.participant != null)
+    ? `participant_${state.experiment.participant}` : (safeName() || "participant");
+  const date = (state.client.date || payload.exportedAt.slice(0, 10)).replace(/-/g, "");
+  download(`${pid}_${date}_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
+  if (window.Sessions && state.sessionId) window.Sessions.markClean(state.sessionId);
 }
 
 // ── Anonymised export & backup conversion (anonymiser.js) ─────────────────
@@ -5003,6 +5024,142 @@ function buildAdaptiveReportSections() {
   return blocks.join("");
 }
 
+// ── Per-participant analysis summary (front page of the report) ──────────
+// Provisional, pre-stats summary aligned with the equivalence analysis plan:
+// one row per completed adaptive track (the analysis "atom" = SRT per language ×
+// ear × repeat), with the SRT at 20 and 30 words and their difference (the
+// truncation quantity), PTA per ear, and the paired Māori−English differences
+// where a same-ear/same-repeat pair exists. This is an indicator only — the real
+// stats (TOST, mixed-effects τ_pm, Bland–Altman, S_w/RC) come later.
+function fmtDb(v) { return (v == null || !Number.isFinite(Number(v))) ? "—" : Number(v).toFixed(1); }
+
+function srtAtWords(log, nWords) {
+  // Reuse the same ML fitter the CSV uses. Words → phoneme observations happen
+  // inside the log entries; slice by word count.
+  if (!Array.isArray(log) || !window.Adaptive || typeof window.Adaptive.fitFromLog !== "function") return null;
+  const slice = log.slice(0, nWords);
+  if (slice.length < 2) return null;
+  try { const f = window.Adaptive.fitFromLog(slice); return f ? f.srt : null; } catch { return null; }
+}
+
+function ptaForEar(ear) {
+  // ear: "left" | "right". Prefer the analysis PTA if ParticipantInputs has one.
+  if (window.ParticipantInputs && typeof window.ParticipantInputs.dataFor === "function") {
+    try {
+      const d = window.ParticipantInputs.dataFor(ear);
+      if (d) {
+        if (Number.isFinite(Number(d.pta))) return Number(d.pta);
+        if (Number.isFinite(Number(d.referenceThreshold))) return Number(d.referenceThreshold);
+        if (Number.isFinite(Number(d.fourfa))) return Number(d.fourfa);
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function buildParticipantSummaryPage() {
+  const tracks = Array.isArray(state.adaptiveTracks) ? state.adaptiveTracks : [];
+  if (!tracks.length) return "";   // only meaningful once adaptive tracks exist
+
+  // Build per-track rows with SRT@20 / SRT@30 / difference.
+  const rows = tracks.map((t, i) => {
+    const ear = t.stimulusEar || t.condition || "";
+    const srt30 = (t.srt != null) ? Number(t.srt) : srtAtWords(t.log, 30);
+    const srt20 = srtAtWords(t.log, 20);
+    const diff = (srt30 != null && srt20 != null) ? (srt30 - srt20) : null;
+    return {
+      idx: i,
+      language: t.language || "maori",
+      ear,
+      lists: Array.isArray(t.listNumbers) ? t.listNumbers.join("+") : (t.listNumbers || ""),
+      srt20, srt30, diff,
+      converged: t.fitConverged,
+      timestamp: t.timestamp || ""
+    };
+  });
+  // Assign a repeat index per (language, ear) in time order.
+  const seen = {};
+  rows.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+  rows.forEach(r => {
+    const key = r.language + "|" + r.ear;
+    seen[key] = (seen[key] || 0) + 1;
+    r.repeat = seen[key];
+  });
+
+  const trackRows = rows.map(r => `
+    <tr>
+      <td>${r.language === "maori" ? "Māori (CVCV)" : "English (CVC)"}</td>
+      <td>${conditionLabel(r.ear)}</td>
+      <td>${r.repeat}</td>
+      <td>${r.lists}</td>
+      <td>${fmtDb(r.srt20)}</td>
+      <td>${fmtDb(r.srt30)}</td>
+      <td>${fmtDb(r.diff)}</td>
+      <td>${r.converged ? "" : "not converged"}</td>
+    </tr>`).join("");
+
+  // Paired Māori−English differences at SRT(30), matched by ear + repeat.
+  const byKey = {};
+  rows.forEach(r => { byKey[r.language + "|" + r.ear + "|" + r.repeat] = r; });
+  const pairRows = [];
+  rows.filter(r => r.language === "maori").forEach(m => {
+    const e = byKey["english|" + m.ear + "|" + m.repeat];
+    if (e && m.srt30 != null && e.srt30 != null) {
+      pairRows.push(`<tr><td>${conditionLabel(m.ear)}</td><td>${m.repeat}</td>
+        <td>${fmtDb(m.srt30)}</td><td>${fmtDb(e.srt30)}</td>
+        <td>${fmtDb(m.srt30 - e.srt30)}</td></tr>`);
+    }
+  });
+
+  // Simple provisional aggregates (indicator only; not the planned stats).
+  const diffs = pairRows.length
+    ? rows.filter(r => r.language === "maori").map(m => {
+        const e = byKey["english|" + m.ear + "|" + m.repeat];
+        return (e && m.srt30 != null && e.srt30 != null) ? (m.srt30 - e.srt30) : null;
+      }).filter(v => v != null)
+    : [];
+  const mean = arr => arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : null;
+  const sd = arr => {
+    if (arr.length < 2) return null;
+    const m = mean(arr); return Math.sqrt(arr.reduce((s, x) => s + (x - m) ** 2, 0) / (arr.length - 1));
+  };
+  const truncs = rows.map(r => r.diff).filter(v => v != null);
+
+  const ptaL = ptaForEar("left"), ptaR = ptaForEar("right");
+
+  const provisional = `
+    <div class="summary-stats">
+      <p><b>Provisional indicators</b> (not the final analysis — see plan):</p>
+      <ul>
+        <li>Māori−English SRT(30) difference: mean ${fmtDb(mean(diffs))} dB, SD ${fmtDb(sd(diffs))} dB, over ${diffs.length} matched pair(s).</li>
+        <li>Truncation SRT(30)−SRT(20): mean ${fmtDb(mean(truncs))} dB, SD ${fmtDb(sd(truncs))} dB, over ${truncs.length} track(s).</li>
+        <li>PTA — left ${fmtDb(ptaL)} dB HL, right ${fmtDb(ptaR)} dB HL.</li>
+      </ul>
+      <p class="report-pi-legend">These are simple descriptive placeholders. The planned equivalence
+      analysis (TOST at ±5 dB, mixed-effects τ_pm, repeated-measures Bland–Altman, S_w / RC, Method×PTA)
+      is run separately across all participants.</p>
+    </div>`;
+
+  return `
+    <section class="report-summary-page">
+      <h2>Participant summary — adaptive SRTs</h2>
+      <p class="report-pi-legend">One row per completed adaptive track. SRT at 20 and 30 words are both
+      reported (the plan's "measure at 20, continue to 30"); their difference is the truncation quantity.</p>
+      <table class="report-table">
+        <thead><tr><th>Test</th><th>Ear</th><th>Rep</th><th>Lists</th>
+          <th>SRT@20 dB(A)</th><th>SRT@30 dB(A)</th><th>Δ(30−20)</th><th>Fit</th></tr></thead>
+        <tbody>${trackRows}</tbody>
+      </table>
+      ${pairRows.length ? `
+        <h3>Paired Māori − English (SRT@30, matched ear &amp; repeat)</h3>
+        <table class="report-table">
+          <thead><tr><th>Ear</th><th>Rep</th><th>Māori SRT</th><th>English SRT</th><th>Māori−English</th></tr></thead>
+          <tbody>${pairRows.join("")}</tbody>
+        </table>` : ""}
+      ${provisional}
+    </section>`;
+}
+
 function showReport() {
   readClientForm();
   if (!state.results || !state.results.length) {
@@ -5095,6 +5252,7 @@ function showReport() {
         <p><b>Notes:</b> ${state.client.notes || ""}</p>
       </div>
     </div>
+    ${buildParticipantSummaryPage()}
     ${adaptiveHtml}
     ${sectionsHtml}
   `;
