@@ -273,17 +273,56 @@
     return xs.status.findIndex(s => s === "pending");
   }
 
-  // Move to the next pending position and prompt it (adaptive or non-adaptive);
-  // if none remain, show completion.
-  function goToNextPending() {
+  // Begin playing the sequence as a playlist. `from` = starting index, or null to
+  // begin at the first pending item. Used by "Start testing".
+  function startPlaylistFrom(from) {
     const xs = xstate();
-    const idx = nextPendingIndex();
-    if (idx === -1) { xs.running = false; renderSection(); showComplete(); return; }
+    xs.singleRun = false;
+    let idx;
+    if (from != null) {
+      idx = from;
+    } else {
+      idx = nextPendingIndex();
+    }
+    if (idx == null || idx < 0) { renderSection(); showComplete(); return; }
     xs.position = idx;
     promptPosition(idx);
   }
 
+  // Advance to the next item in playlist mode. In redo-all mode we step to the
+  // very next index (confirming a replacement if it's already done); otherwise we
+  // jump to the next still-pending item. When nothing is left, show completion.
+  function goToNextPending() {
+    const xs = xstate();
+    xs.singleRun = false;   // playlist/linear flow
+    let idx;
+    if (xs.redoAll) {
+      idx = xs.position + 1;
+      // Skip past the end.
+      if (idx >= (xs.status ? xs.status.length : 0)) idx = -1;
+    } else {
+      idx = nextPendingIndex();
+    }
+    if (idx === -1 || idx == null) {
+      xs.running = false; xs.redoAll = false; renderSection(); showComplete(); return;
+    }
+    xs.position = idx;
+    // In redo mode an already-done item is re-run; promptPosition will show its
+    // modal. The replace-confirmation happened once at Start; here we proceed.
+    promptPosition(idx);
+  }
+
   function langLabel(key) { return key === "maori" ? "te reo Māori (CVCV)" : "NZ English (CVC)"; }
+
+  // After a deliberate single-position run, bring the clinician back to the
+  // sequence view (the experiment section lives on the setup screen) so they see
+  // the updated tick and can pick the next position.
+  function backToSequence() {
+    if (typeof global.show === "function") { try { global.show("screen-setup"); } catch {} }
+    if (typeof global.updateSetupResultsSummary === "function") {
+      try { global.updateSetupResultsSummary(); } catch {}
+    }
+  }
   function earPhrase(entry) {
     return entry.earKey === "binaural" ? "binaurally"
          : `in the ${entry.earKey || earWord(entry.ear)} ear`;
@@ -307,10 +346,14 @@
         `You can change any list or level from the queue as scores come in.`;
     } catch (e) { preview = "Prepare the fixed-level lists for this block."; }
     dlg.querySelector("#experimentModalBody").textContent =
-      `Fixed-level comparison. ${preview}`;
+      `This starts the fixed-level ${langLabel(entry.language)} block for the ` +
+      `${entry.earKey} ear now — you don't need to run the earlier positions first. ` +
+      preview;
     const go = dlg.querySelector("#experimentModalGo");
-    go.textContent = "Continue";
-    go.onclick = () => { dlg.close(); beginNonAdaptiveBlock(slot); };
+    go.textContent = `Start NA-${entry.naIndex} now`;
+    const cancel = dlg.querySelector("#experimentModalCancel");
+    if (cancel) cancel.textContent = "Cancel";
+    go.onclick = () => { dlg.close(); beginNonAdaptiveBlock(entry); };
     if (typeof dlg.showModal === "function") dlg.showModal();
   }
 
@@ -318,11 +361,32 @@
     const xs = xstate();
     xs.naRunning = entry;
     xs.running = true;   // reuse the running flag so row clicks are blocked
-    if (global.NonAdaptive && typeof global.NonAdaptive.runBlock === "function") {
-      global.NonAdaptive.runBlock(entry.language, entry.earKey);
+    try {
+      if (global.NonAdaptive && typeof global.NonAdaptive.runBlock === "function") {
+        global.NonAdaptive.runBlock(entry.language, entry.earKey);
+      }
+    } catch (e) {
+      console.error("[experiment] non-adaptive runBlock failed:", e);
+      xs.running = false; xs.naRunning = null;
+      alert("Could not prepare the non-adaptive block. See the console for details.");
+      renderSection();
+      return;
     }
-    // Hand to the app's normal fixed-mode test flow.
-    if (typeof global.startTesting === "function") global.startTesting();
+    // Hand to the app's normal fixed-mode test flow. Guard that the queue was
+    // actually populated, and that we land on the test screen.
+    if (!global.state.queue || !global.state.queue.length) {
+      console.error("[experiment] non-adaptive block produced an empty queue");
+      xs.running = false; xs.naRunning = null;
+      alert("The non-adaptive block had no lists to run.");
+      renderSection();
+      return;
+    }
+    if (typeof global.startTesting === "function") {
+      global.startTesting();
+    }
+    // Belt-and-braces: make sure the test screen is showing even if startTesting
+    // took an unexpected path.
+    if (typeof global.show === "function") { try { global.show("screen-test"); } catch {} }
   }
 
   // Called by the app when a non-adaptive (fixed-mode) queue finishes in
@@ -340,8 +404,11 @@
     xs._finishingIdx = null;
     if (typeof global.saveSession === "function") global.saveSession();
     renderSection();
-    // Advance to the next pending position (adaptive or non-adaptive), or finish.
-    setTimeout(() => { goToNextPending(); }, 50);
+    // A deliberate single run returns to the sequence; a linear run chains on.
+    setTimeout(() => {
+      if (xs.singleRun) { xs.singleRun = false; renderSection(); backToSequence(); return; }
+      goToNextPending();
+    }, 50);
   }
 
   // Run a SPECIFIC position (from a sequence-row click, or the linear flow). If it
@@ -352,6 +419,9 @@
     const xs = xstate();
     const seq = sequenceFor(xs.participant);
     if (!seq || idx < 0 || idx >= seq.length) return;
+    // Launched by a deliberate row click: run just this one and return to the
+    // sequence afterwards, rather than chaining into the next pending position.
+    xs.singleRun = true;
     xs.position = idx;
     promptPosition(idx);
   }
@@ -402,12 +472,16 @@
     renderSection();   // show the ✓ at once, before the next prompt
 
     if (opts && opts.deferAdvance) {
-      xs._awaitingSummaryClose = true;   // resumeAfterSummary() will advance
+      xs._awaitingSummaryClose = true;   // resumeAfterSummary() will advance/stop
       return;
     }
     // Fallback (no summary dialog / legacy path): small delay so the app's own
     // summary dialog, if any, is seen first.
-    setTimeout(() => { xs._finishingIdx = null; goToNextPending(); }, 50);
+    setTimeout(() => {
+      xs._finishingIdx = null;
+      if (xs.singleRun) { xs.singleRun = false; renderSection(); backToSequence(); return; }
+      goToNextPending();
+    }, 50);
   }
 
   // Called by the app when the clinician closes the per-track summary dialog.
@@ -418,6 +492,7 @@
     xs._finishingIdx = null;
     if (!xs._awaitingSummaryClose) return;
     xs._awaitingSummaryClose = false;
+    if (xs.singleRun) { xs.singleRun = false; renderSection(); backToSequence(); return; }
     goToNextPending();
   }
 
@@ -733,19 +808,28 @@
     };
 
     // Wire buttons.
+    // "Start testing" plays the sequence like a playlist: items run in order and
+    // auto-advance. If some are already ticked it asks whether to skip those
+    // (resume) or redo everything from the top.
     section.querySelector("#experimentStartBtn").onclick = () => {
       const p = Number(sel.value);
       if (!p) { alert("Select a participant first."); return; }
       const xs = xstate();
-      // Make sure this participant is loaded (e.g. if the page was restored).
       if (xs.participant !== p) loadParticipant(p, { run: false });
-      const hasProgress = Array.isArray(xs.status) && xs.status.some(s => s !== "pending");
-      if (hasProgress &&
-          !confirm(`Participant ${p} already has progress. Start from the next ` +
-                   `unfinished position? (Completed positions keep their results; use ` +
-                   `the row clicks to repeat individual ones.)`)) return;
-      // Begin the run from the first pending position.
-      goToNextPending();
+      if (xs.running) { alert("A test is already running. Finish or abandon it first."); return; }
+
+      const doneCount = (xs.status || []).filter(s => s === "done").length;
+      if (doneCount) {
+        const redo = confirm(
+          `Participant ${p} already has ${doneCount} completed item${doneCount === 1 ? "" : "s"}.\n\n` +
+          `• OK = redo the whole sequence from the top (each completed item asks before it is replaced)\n` +
+          `• Cancel = skip completed items and continue from the next unfinished one`);
+        xs.redoAll = !!redo;
+      } else {
+        xs.redoAll = false;
+      }
+      xs.singleRun = false;   // playlist: chain through items with auto-advance
+      startPlaylistFrom(xs.redoAll ? 0 : null);
     };
     section.querySelector("#experimentClearBtn").onclick = clearParticipant;
     section.querySelector("#experimentDownloadAdmin").onclick = downloadAdminCsv;
@@ -846,13 +930,15 @@
         <th style="padding:.2rem .4rem">Lists</th><th style="padding:.2rem .4rem"></th>
       </tr></thead><tbody>${rows}</tbody>`;
 
-    // Click a row to run/repeat/replace that position.
+    // Click a row to run just that one item now — a one-off, no auto-advance.
+    // After it finishes it ticks and returns to the sequence view. (Start testing
+    // is what plays the whole sequence in order.)
     table.querySelectorAll("tr.experiment-row").forEach(tr => {
       tr.onclick = () => {
         const idx = Number(tr.getAttribute("data-idx"));
         const st = (xs.status && xs.status[idx]) || "pending";
         if (xs.running) {
-          alert("A track is currently running. Finish or abandon it before choosing another position.");
+          alert("A test is currently running. Finish or abandon it before choosing another item.");
           return;
         }
         const entry = seq[idx];
@@ -861,6 +947,9 @@
             !confirm(`${label} already has a result (${st}). ` +
                      `Run it again? The new take replaces the old as the current result ` +
                      `(the previous take is kept in the data, marked superseded).`)) return;
+        // One-off: runPosition sets singleRun so it runs just this item and
+        // returns to the sequence view afterwards (no auto-advance).
+        xs.redoAll = false;
         runPosition(idx);
       };
     });
@@ -899,18 +988,26 @@
     const nAdaptive = seq.filter(e => e.kind !== "nonadaptive").length || 12;
     dlg.querySelector("#experimentModalTitle").textContent =
       `Position ${admin.position} of ${nAdaptive} — repeat ${admin.repeat}`;
-    dlg.querySelector("#experimentModalBody").textContent = instructionFor(admin);
+    dlg.querySelector("#experimentModalBody").textContent =
+      instructionFor(admin) + " This runs the selected position now; you can run positions in any order.";
     const go = dlg.querySelector("#experimentModalGo");
-    go.textContent = "Continue";
+    go.textContent = `Start position ${admin.position} now`;
+    const cancel = dlg.querySelector("#experimentModalCancel");
+    if (cancel) cancel.textContent = "Cancel";
     go.onclick = () => { dlg.close(); beginAdminTrack(); };
     if (typeof dlg.showModal === "function") dlg.showModal();
   }
   function showComplete() {
     const dlg = ensureModal();
-    dlg.querySelector("#experimentModalTitle").textContent = "Participant complete";
+    const xs = xstate();
+    const seq = sequenceFor(xs.participant) || [];
+    const naCount = seq.filter(e => e.kind === "nonadaptive").length;
+    const naNote = naCount ? ` (including ${naCount} non-adaptive)` : "";
+    dlg.querySelector("#experimentModalTitle").textContent = "Sequence complete";
     dlg.querySelector("#experimentModalBody").textContent =
-      `All 12 administrations are done. The data has been written to the two CSV ` +
-      `stores — use the download buttons to save them. You can now select another participant.`;
+      `All ${seq.length} items${naNote} are done. The data has been written to the two CSV ` +
+      `stores — use the download buttons to save them. You can click any row to repeat an ` +
+      `item, or select another participant.`;
     const go = dlg.querySelector("#experimentModalGo");
     go.textContent = "Done";
     go.onclick = () => { dlg.close(); setGhosted(false); renderSection(); };
