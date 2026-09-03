@@ -503,8 +503,37 @@
     const idx = xs.position;
     if (Array.isArray(xs.status)) xs.status[idx] = "aborted";
     xs.running = false;
+    xs.naRunning = null;
     if (typeof global.saveSession === "function") global.saveSession();
     renderSection();
+  }
+
+  // Is a test GENUINELY on screen right now? xs.running can be left stale if the
+  // clinician was booted mid-list (page reload, audio crash, session restore):
+  // the flag persists but the test screen isn't showing, which locks every row
+  // and the Start button behind "a test is already running". A real running test
+  // requires the test screen to be active.
+  function testScreenActive() {
+    const el = (typeof document !== "undefined") && document.getElementById("screen-test");
+    return !!(el && el.classList && el.classList.contains("active"));
+  }
+
+  // If xs.running is set but no test is actually on screen, the flag is stale.
+  // Clear it, mark the interrupted position "aborted" so it can be re-run, and
+  // return true so callers know a recovery happened.
+  function recoverStaleRunning() {
+    const xs = xstate();
+    if (!xs.running || testScreenActive()) return false;
+    const idx = xs.position;
+    // Mark the interrupted position aborted (✗) so it's clearly re-runnable —
+    // unless it had already been recorded as done.
+    if (Array.isArray(xs.status) && idx != null && xs.status[idx] !== "done") {
+      xs.status[idx] = "aborted";
+    }
+    xs.running = false;
+    xs.naRunning = null;
+    if (typeof global.saveSession === "function") global.saveSession();
+    return true;
   }
 
   // How many recorded takes exist for a given 1-based position (for take numbering).
@@ -817,7 +846,14 @@
       if (!p) { alert("Select a participant first."); return; }
       const xs = xstate();
       if (xs.participant !== p) loadParticipant(p, { run: false });
-      if (xs.running) { alert("A test is already running. Finish or abandon it first."); return; }
+      if (xs.running) {
+        if (recoverStaleRunning()) {
+          renderSection();   // stale flag cleared — proceed
+        } else if (testScreenActive()) {
+          alert("A test is currently running on screen. Finish or abandon it first.");
+          return;
+        }
+      }
 
       const doneCount = (xs.status || []).filter(s => s === "done").length;
       if (doneCount) {
@@ -867,6 +903,13 @@
     }
 
     const xs = xstate();
+    // Self-heal: if a previous test left xs.running set but no test is actually on
+    // screen (clinician booted mid-list, page reloaded, session restored), clear
+    // the stale flag now so the sequence isn't locked behind "a test is already
+    // running". The interrupted position is marked aborted and can be re-run.
+    if (xs.running && !testScreenActive()) {
+      recoverStaleRunning();
+    }
     const sel = section.querySelector("#experimentParticipant");
     if (xs.participant && sel.value !== String(xs.participant)) sel.value = String(xs.participant);
 
@@ -947,8 +990,21 @@
         const idx = Number(tr.getAttribute("data-idx"));
         const st = (xs.status && xs.status[idx]) || "pending";
         if (xs.running) {
-          alert("A test is currently running. Finish or abandon it before choosing another item.");
-          return;
+          // If the flag is stale (booted mid-list — no test actually on screen),
+          // clear it silently and carry on. Only block if a test is really live.
+          if (recoverStaleRunning()) {
+            renderSection();
+            // fall through to let this click run the chosen item
+          } else if (testScreenActive()) {
+            if (confirm("A test is currently running on screen. Abandon it and choose this item instead? " +
+                        "(The abandoned track is marked and can be re-run.)")) {
+              if (typeof global.abandonList === "function") global.abandonList();
+              else onTrackAborted();
+              renderSection();
+            } else {
+              return;
+            }
+          }
         }
         const entry = seq[idx];
         const label = entry.kind === "nonadaptive" ? `Non-adaptive block NA-${entry.naIndex}` : `Position ${entry.position}`;

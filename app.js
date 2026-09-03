@@ -656,6 +656,58 @@ function init() {
   startMaoriPreloadWhenIdle();
   // If a restored session is already in English, warm that batch too.
   if (state.language === "english") startEnglishPreloadIfNeeded();
+  // Crash / boot recovery: if a session was left mid-run (browser closed, tab
+  // reloaded, clinician booted), offer to pick up exactly where it left off —
+  // rather than leaving it buried in Recent Sessions for them to find.
+  offerResumeInterrupted();
+}
+
+// Offer to resume the most recent interrupted session on load. Only prompts when
+// there's genuine progress to recover, and never auto-loads over current work.
+function offerResumeInterrupted() {
+  if (!window.Sessions || typeof window.Sessions.list !== "function") return;
+  // Don't offer if the clinician already has live work on screen this load.
+  if ((state.results && state.results.length) || (state.adaptive)) return;
+  const interrupted = window.Sessions.list().filter(d => d.status === "interrupted");
+  if (!interrupted.length) return;
+  // Skip any the clinician already declined to resume on this device.
+  let declined = {};
+  try { declined = JSON.parse(localStorage.getItem("ucResumeDeclined") || "{}"); } catch {}
+  const d = interrupted.find(s => !declined[s.id]);
+  if (!d) return;   // nothing new to offer
+  // Describe it. Prefer experiment progress if we can read the payload.
+  let who = (d.client && d.client.name) ? d.client.name : "";
+  let progress = "";
+  try {
+    const payload = window.Sessions.loadPayload(d.id);
+    if (payload) {
+      const xs = payload.experiment;
+      if (xs && xs.participant != null && Array.isArray(xs.status)) {
+        const done = xs.status.filter(s => s === "done").length;
+        who = who || `Participant ${xs.participant}`;
+        progress = ` — ${done} of ${xs.status.length} items done`;
+      } else if (Array.isArray(payload.results)) {
+        progress = ` — ${payload.results.length} trial(s) recorded`;
+      }
+    }
+  } catch {}
+  const label = who || "a previous session";
+  const when = d.savedAt ? new Date(d.savedAt).toLocaleString() : "";
+  if (confirm(
+      `Resume ${label}?${progress}\n` +
+      (when ? `Last saved ${when}.\n\n` : "\n") +
+      `This session was interrupted (browser closed, reloaded, or the test was ` +
+      `booted). Resuming brings back the full sequence and all completed items so ` +
+      `you can carry on. Choose Cancel to start fresh — it stays in Recent Sessions ` +
+      `either way.`)) {
+    restoreSession(d.id);
+  } else {
+    // Remember the decline so we don't ask again for this session on this device.
+    try {
+      declined[d.id] = true;
+      localStorage.setItem("ucResumeDeclined", JSON.stringify(declined));
+    } catch {}
+  }
 }
 
 // ── Clinic settings (device-persistent, separate from session) ──
