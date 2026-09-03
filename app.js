@@ -5096,13 +5096,19 @@ function srtAtWords(log, nWords) {
 
 function ptaForEar(ear) {
   // ear: "left" | "right". Prefer the analysis PTA if ParticipantInputs has one.
+  // IMPORTANT: distinguish a genuinely measured 0 dB HL (normal hearing — a valid
+  // data point) from a not-entered value. Number(null) is 0 and Number.isFinite(0)
+  // is true, so we must reject null/undefined/"" BEFORE coercing, or a missing PTA
+  // would be misreported as 0.0.
+  const num = (v) => (v === null || v === undefined || v === "") ? null
+                   : (Number.isFinite(Number(v)) ? Number(v) : null);
   if (window.ParticipantInputs && typeof window.ParticipantInputs.dataFor === "function") {
     try {
       const d = window.ParticipantInputs.dataFor(ear);
       if (d) {
-        if (Number.isFinite(Number(d.pta))) return Number(d.pta);
-        if (Number.isFinite(Number(d.referenceThreshold))) return Number(d.referenceThreshold);
-        if (Number.isFinite(Number(d.fourfa))) return Number(d.fourfa);
+        let v = num(d.pta);              if (v !== null) return v;
+        v = num(d.referenceThreshold);   if (v !== null) return v;
+        v = num(d.fourfa);               if (v !== null) return v;
       }
     } catch {}
   }
@@ -5185,7 +5191,7 @@ function buildParticipantSummaryPage() {
       <ul>
         <li>Māori−English SRT(30) difference: mean ${fmtDb(mean(diffs))} dB, SD ${fmtDb(sd(diffs))} dB, over ${diffs.length} matched pair(s).</li>
         <li>Truncation SRT(30)−SRT(20): mean ${fmtDb(mean(truncs))} dB, SD ${fmtDb(sd(truncs))} dB, over ${truncs.length} track(s).</li>
-        <li>PTA — left ${fmtDb(ptaL)} dB HL, right ${fmtDb(ptaR)} dB HL.</li>
+        <li>PTA — left ${ptaL == null ? "not entered" : fmtDb(ptaL) + " dB HL"}, right ${ptaR == null ? "not entered" : fmtDb(ptaR) + " dB HL"}.</li>
       </ul>
       <p class="report-pi-legend">These are simple descriptive placeholders. The planned equivalence
       analysis (TOST at ±5 dB, mixed-effects τ_pm, repeated-measures Bland–Altman, S_w / RC, Method×PTA)

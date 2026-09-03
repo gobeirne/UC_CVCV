@@ -274,17 +274,21 @@ function tracksFromPayload(d, fileName) {
 
 function readPTA(d) {
   // Prefer the saved audiogram (state.participant). Fall back to null.
+  // Guard against Number(null)===0: a not-entered PTA must stay null, not become
+  // a spurious 0 dB point. A genuinely measured 0 (normal hearing) is kept.
+  const num = (v) => (v === null || v === undefined || v === "") ? null
+                   : (Number.isFinite(Number(v)) ? Number(v) : null);
   const res = { left: null, right: null };
   const p = d.participant;
   if (!p) return res;
   ['left','right'].forEach(ear => {
     const e = p[ear]; if (!e) return;
-    if (Number.isFinite(Number(e.pta))) { res[ear] = Number(e.pta); return; }
-    if (Number.isFinite(Number(e.fourfa))) { res[ear] = Number(e.fourfa); return; }
+    let v = num(e.pta);    if (v !== null) { res[ear] = v; return; }
+    v = num(e.fourfa);     if (v !== null) { res[ear] = v; return; }
     // derive a 0.5–1–2–4 kHz average from AC unmasked if present
     const ac = e.audiogram && e.audiogram.acUnmasked;
     if (ac) {
-      const f = [500,1000,2000,4000].map(k => Number(ac[k])).filter(Number.isFinite);
+      const f = [500,1000,2000,4000].map(k => num(ac[k])).filter(x => x !== null);
       if (f.length) res[ear] = +(f.reduce((s,x)=>s+x,0)/f.length).toFixed(1);
     }
   });
