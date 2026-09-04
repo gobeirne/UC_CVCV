@@ -266,6 +266,41 @@
   // Kept for callers that want the old "set up and immediately run" behaviour.
   function startParticipant(participant) { loadParticipant(participant, { run: true }); }
 
+  // Switch to a participant, guarding against BOTH data loss and data mixing.
+  // If moving to a DIFFERENT participant who has recorded data, warn (offering to
+  // export first when it hasn't been saved), then CLEAR the previous participant's
+  // tracks/results/CSVs so one person's run can never be appended to another's
+  // (the fault that grouped P4 + P17). Returns true if the switch proceeded,
+  // false if the clinician cancelled. Loading the SAME participant always proceeds.
+  function switchToParticipant(p) {
+    const xs = xstate();
+    const switching = xs.participant && xs.participant !== p;
+    if (switching) {
+      const hasData = (typeof global.hasRecordedData === "function") && global.hasRecordedData();
+      if (hasData) {
+        const exported = global.state && global.state._participantExported;
+        if (!exported) {
+          const proceed = confirm(
+            `Participant ${xs.participant} has recorded data that hasn't been exported this session.\n\n` +
+            `Switching to participant ${p} will CLEAR participant ${xs.participant}'s data from the app ` +
+            `so the two are never mixed in one file.\n\n` +
+            `• Cancel, then use "Download participant JSON (all data)" to save participant ` +
+            `${xs.participant} first — recommended.\n` +
+            `• OK to switch anyway and discard participant ${xs.participant}'s in-app data.`);
+          if (!proceed) return false;
+        } else if (!confirm(`Switch to participant ${p}? Participant ${xs.participant}'s data has been ` +
+                            `exported and will now be cleared from the app.`)) {
+          return false;
+        }
+      }
+      if (typeof global.clearParticipantData === "function") global.clearParticipantData();
+      xs.status = null; xs.statusParticipant = null; xs.naSlots = null;
+      xs.running = false; xs.naRunning = null;
+    }
+    loadParticipant(p, { run: false });
+    return true;
+  }
+
   // Index of the first pending position, or -1 if none remain.
   function nextPendingIndex() {
     const xs = xstate();
@@ -827,14 +862,7 @@
       const p = Number(sel.value);
       const xs = xstate();
       if (!p) { clearParticipant(); return; }
-      const switching = xs.participant && xs.participant !== p;
-      if (switching && Array.isArray(xs.status) && xs.status.some(s => s !== "pending") &&
-          !confirm(`Switch to participant ${p}? The current participant's progress ` +
-                   `markers are cleared (data already written to CSV is kept).`)) {
-        sel.value = String(xs.participant);   // revert the dropdown
-        return;
-      }
-      loadParticipant(p, { run: false });
+      if (!switchToParticipant(p)) { sel.value = String(xs.participant || ""); return; }
     };
 
     // Wire buttons.
@@ -845,7 +873,9 @@
       const p = Number(sel.value);
       if (!p) { alert("Select a participant first."); return; }
       const xs = xstate();
-      if (xs.participant !== p) loadParticipant(p, { run: false });
+      if (xs.participant !== p) {
+        if (!switchToParticipant(p)) { sel.value = String(xs.participant || ""); return; }
+      }
       if (xs.running) {
         if (recoverStaleRunning()) {
           renderSection();   // stale flag cleared — proceed

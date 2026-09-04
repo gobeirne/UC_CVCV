@@ -4755,6 +4755,48 @@ function downloadParticipantJson() {
   const date = (state.client.date || payload.exportedAt.slice(0, 10)).replace(/-/g, "");
   download(`${pid}_${date}_speech_audiometry.json`, "application/json", JSON.stringify(payload, null, 2));
   if (window.Sessions && state.sessionId) window.Sessions.markClean(state.sessionId);
+  state._participantExported = true;   // mark this participant's data as saved
+}
+
+// Does the current run hold any recorded data (adaptive tracks, fixed results, or
+// experiment CSV rows)? Used to warn before that data would be cleared.
+function hasRecordedData() {
+  if (Array.isArray(state.adaptiveTracks) && state.adaptiveTracks.length) return true;
+  if (Array.isArray(state.results) && state.results.length) return true;
+  const xs = state.experiment;
+  if (xs) {
+    const rows = (csv) => csv ? csv.split("\n").filter((l, i) => i > 0 && l.trim()).length : 0;
+    if (rows(xs.adminCsv) || rows(xs.trialCsv)) return true;
+  }
+  return false;
+}
+
+// Clear ALL of the current participant's recorded data. Used when switching to a
+// different participant, so one person's tracks can never be appended to another's
+// (the fault that grouped P4 + P17 into one file). This resets the app-level data
+// AND the experiment CSV stores; it does NOT touch the frozen allocation or the
+// clinician/notes fields. Callers are responsible for confirming/exporting first.
+function clearParticipantData() {
+  state.adaptiveTracks = [];
+  state.results = [];
+  state.summaries = [];
+  state.queue = [];
+  state.adaptive = null;
+  state.currentTrials = [];
+  state.currentListIndex = 0;
+  state.currentTrialIndex = 0;
+  state.participant = null;            // per-ear audiogram/inputs for the new person
+  state.nonAdaptive = null;            // non-adaptive plan is per participant
+  if (state.experiment) {
+    state.experiment.adminCsv = null;
+    state.experiment.trialCsv = null;
+    state.experiment.naSlots = null;
+    state.experiment.naRunning = null;
+  }
+  state._participantExported = false;
+  refreshPI();
+  updateSetupResultsSummary();
+  saveSession();
 }
 
 // ── Anonymised export & backup conversion (anonymiser.js) ─────────────────
@@ -5115,11 +5157,52 @@ function ptaForEar(ear) {
   return null;
 }
 
+// ── Adaptive-track reliability indicators ────────────────────────────────
+// Two measures of how well a single A1 track pinned down the SRT. These index
+// the reliability of the threshold estimate itself — unlike the psychometric
+// slope, which A1 deliberately leaves weakly determined (few off-threshold
+// trials), so slope is NOT a sound reliability flag here.
+
+// Reversal count: number of direction changes in the presentation-level staircase.
+// The standard adaptive-audiometry reliability measure — more reversals near
+// threshold = more independent crossings = a more stable SRT.
+function trackReversals(log) {
+  if (!Array.isArray(log) || log.length < 3) return null;
+  const levels = log.map(e => Number(e.level)).filter(Number.isFinite);
+  let rev = 0, prev = 0;
+  for (let i = 1; i < levels.length; i++) {
+    const d = levels[i] - levels[i - 1];
+    const s = d > 1e-9 ? 1 : (d < -1e-9 ? -1 : 0);
+    if (s !== 0) {
+      if (prev !== 0 && s !== prev) rev++;
+      prev = s;
+    }
+  }
+  return rev;
+}
+
+// Standard error of the SRT estimate: SD of the settled presentation levels
+// (after the track has homed in) divided by √n. The classic precision estimate
+// for an adaptive threshold. `skip` drops the initial descent before the track
+// settles (A1 starts high and steps down).
+function trackSrtSE(log, skip) {
+  if (!Array.isArray(log)) return null;
+  const levels = log.map(e => Number(e.level)).filter(Number.isFinite);
+  const drop = (skip == null) ? Math.min(15, Math.floor(levels.length / 2)) : skip;
+  const settled = levels.slice(drop);
+  if (settled.length < 3) return null;
+  const m = settled.reduce((s, x) => s + x, 0) / settled.length;
+  const sd = Math.sqrt(settled.reduce((s, x) => s + (x - m) ** 2, 0) / settled.length);
+  return sd / Math.sqrt(settled.length);
+}
+
+function fmtNum(v, d = 2) { return (v == null || !Number.isFinite(Number(v))) ? "—" : Number(v).toFixed(d); }
+
 function buildParticipantSummaryPage() {
   const tracks = Array.isArray(state.adaptiveTracks) ? state.adaptiveTracks : [];
   if (!tracks.length) return "";   // only meaningful once adaptive tracks exist
 
-  // Build per-track rows with SRT@20 / SRT@30 / difference.
+  // Build per-track rows with SRT@20 / SRT@30 / difference + reliability.
   const rows = tracks.map((t, i) => {
     const ear = t.stimulusEar || t.condition || "";
     const srt30 = (t.srt != null) ? Number(t.srt) : srtAtWords(t.log, 30);
@@ -5131,6 +5214,8 @@ function buildParticipantSummaryPage() {
       ear,
       lists: Array.isArray(t.listNumbers) ? t.listNumbers.join("+") : (t.listNumbers || ""),
       srt20, srt30, diff,
+      reversals: trackReversals(t.log),
+      seSrt: trackSrtSE(t.log),
       converged: t.fitConverged,
       timestamp: t.timestamp || ""
     };
@@ -5153,6 +5238,8 @@ function buildParticipantSummaryPage() {
       <td>${fmtDb(r.srt20)}</td>
       <td>${fmtDb(r.srt30)}</td>
       <td>${fmtDb(r.diff)}</td>
+      <td>${r.reversals == null ? "—" : r.reversals}</td>
+      <td>${fmtNum(r.seSrt)}</td>
       <td>${r.converged ? "" : "not converged"}</td>
     </tr>`).join("");
 
@@ -5205,9 +5292,14 @@ function buildParticipantSummaryPage() {
       reported (the plan's "measure at 20, continue to 30"); their difference is the truncation quantity.</p>
       <table class="report-table">
         <thead><tr><th>Test</th><th>Ear</th><th>Rep</th><th>Lists</th>
-          <th>SRT@20 dB(A)</th><th>SRT@30 dB(A)</th><th>Δ(30−20)</th><th>Fit</th></tr></thead>
+          <th>SRT@20 dB(A)</th><th>SRT@30 dB(A)</th><th>Δ(30−20)</th>
+          <th>Reversals</th><th>SE dB</th><th>Fit</th></tr></thead>
         <tbody>${trackRows}</tbody>
       </table>
+      <p class="report-pi-legend"><b>Reliability:</b> Reversals = staircase direction changes
+      (more = a more stable threshold); SE = standard error of the SRT (SD of the settled
+      presentation levels ÷ √n; smaller = more precise). Preferred over slope, which A1 leaves
+      weakly determined. Interpretation/flagging to follow.</p>
       ${pairRows.length ? `
         <h3>Paired Māori − English (SRT@30, matched ear &amp; repeat)</h3>
         <table class="report-table">
