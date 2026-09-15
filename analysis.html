@@ -243,6 +243,30 @@ function srtAtWords(log, n) {
   return S.mean(levels);
 }
 
+// ── Track reliability helpers (mirrors the app's report) ──────────────────
+// Reversals = staircase direction changes; SE = SD of settled levels ÷ √n.
+function trackReversals(log) {
+  if (!Array.isArray(log) || log.length < 3) return null;
+  const levels = log.map(e => Number(e.level)).filter(Number.isFinite);
+  let rev = 0, prev = 0;
+  for (let i = 1; i < levels.length; i++) {
+    const dd = levels[i] - levels[i-1];
+    const s = dd > 1e-9 ? 1 : (dd < -1e-9 ? -1 : 0);
+    if (s !== 0) { if (prev !== 0 && s !== prev) rev++; prev = s; }
+  }
+  return rev;
+}
+function trackSrtSE(log) {
+  if (!Array.isArray(log)) return null;
+  const levels = log.map(e => Number(e.level)).filter(Number.isFinite);
+  const drop = Math.min(15, Math.floor(levels.length / 2));
+  const settled = levels.slice(drop);
+  if (settled.length < 3) return null;
+  const m = settled.reduce((s,x)=>s+x,0)/settled.length;
+  const sd = Math.sqrt(settled.reduce((s,x)=>s+(x-m)**2,0)/settled.length);
+  return +(sd/Math.sqrt(settled.length)).toFixed(2);
+}
+
 function tracksFromPayload(d, fileName) {
   const out = [];
   const pid = (d.experiment && d.experiment.participant != null)
@@ -265,6 +289,9 @@ function tracksFromPayload(d, fileName) {
       lists: Array.isArray(t.listNumbers)?t.listNumbers.join('+'):'',
       srt20: srt20==null?null:+srt20.toFixed(2),
       srt30: srt30==null?null:+srt30.toFixed(2),
+      reversals: trackReversals(t.log),
+      seSrt: trackSrtSE(t.log),
+      method: t.srtMethod || (t.srtDegenerate ? 'fixed-slope' : 'free-slope'),
       pta: ptaByEar[ear] ?? null,
       converged: !!t.fitConverged, file: fileName
     });
@@ -484,18 +511,23 @@ function srtTable() {
     a.ear.localeCompare(b.ear)||a.repeat-b.repeat);
   host.innerHTML = `<table><thead><tr>
     <th>Participant</th><th>Test</th><th>Ear</th><th>Rep</th><th>Lists</th>
-    <th class="num">SRT@20</th><th class="num">SRT@30</th><th class="num">Δ(30−20)</th><th class="num">PTA</th></tr></thead><tbody>
+    <th class="num">SRT@20</th><th class="num">SRT@30</th><th class="num">Δ(30−20)</th>
+    <th class="num">Rev</th><th class="num">SE</th><th>Fit</th><th class="num">PTA</th></tr></thead><tbody>
     ${rows.map(r=>`<tr><td>${r.participant}</td><td>${r.language==='maori'?'Māori':'English'}</td>
       <td>${r.ear}</td><td>${r.repeat}</td><td>${r.lists}</td>
       <td class="num">${fmt(r.srt20)}</td><td class="num">${fmt(r.srt30)}</td>
       <td class="num">${r.srt20!=null&&r.srt30!=null?fmt(r.srt30-r.srt20):'—'}</td>
+      <td class="num">${r.reversals==null?'—':r.reversals}</td>
+      <td class="num">${r.seSrt==null?'—':fmt(r.seSrt,2)}</td>
+      <td>${r.method && r.method!=='free-slope' ? r.method : ''}</td>
       <td class="num">${fmt(r.pta)}</td></tr>`).join('')}
   </tbody></table>`;
 }
 document.getElementById('csvBtn').onclick = () => {
-  const head = ['participant','language','ear','repeat','lists','srt20_dB','srt30_dB','trunc_30_minus_20','pta_dBHL','converged','file'];
+  const head = ['participant','language','ear','repeat','lists','srt20_dB','srt30_dB','trunc_30_minus_20','reversals','se_srt_dB','fit_method','pta_dBHL','converged','file'];
   const rows = state.records.map(r => [r.participant,r.language,r.ear,r.repeat,r.lists,
-    r.srt20??'',r.srt30??'',(r.srt20!=null&&r.srt30!=null)?(r.srt30-r.srt20).toFixed(2):'',r.pta??'',r.converged?1:0,r.file]);
+    r.srt20??'',r.srt30??'',(r.srt20!=null&&r.srt30!=null)?(r.srt30-r.srt20).toFixed(2):'',
+    r.reversals??'',r.seSrt??'',r.method??'',r.pta??'',r.converged?1:0,r.file]);
   const csv = [head, ...rows].map(row=>row.map(c=>/[",\n]/.test(String(c))?`"${String(c).replace(/"/g,'""')}"`:c).join(',')).join('\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
   a.download='srt_table.csv'; a.click(); URL.revokeObjectURL(a.href);

@@ -54,6 +54,26 @@
   // number of alternatives; it remains configurable for that case.)
   const DEFAULT_PER_UNIT_FLOOR = 0;
 
+  // Fixed-slope fallback for degenerate free-slope fits.
+  // A1 concentrates trials near threshold, so estimating threshold AND slope
+  // together is weakly identified — on erratic data the free-slope fit can drift
+  // to a degenerate corner (near-zero slope, SRT thrown off past the data). When
+  // that happens we re-fit the SRT with the slope HELD at a fixed value, so the
+  // fallback stays on the same MLE footing as the good tracks (rather than
+  // switching to a different estimator).
+  //
+  // These slopes were derived from OUR OWN speech-in-QUIET word data: the median
+  // free-slope estimate across all non-degenerate tracks collected to 14 Sep 2026
+  // (Māori n=23, English n=24; medians 0.073 and 0.076, very close). They are on
+  // this fitter's own slope scale — NOT the β=0.25 from the other student's
+  // speech-in-NOISE sentence/tone work, which is a different paradigm and scale.
+  // Re-derive and update if the pooled estimate shifts as more data arrives.
+  const FIXED_SLOPE = { maori: 0.073, english: 0.076, default: 0.075 };
+  function fixedSlopeFor(language) {
+    const k = String(language || "").toLowerCase();
+    return FIXED_SLOPE[k] != null ? FIXED_SLOPE[k] : FIXED_SLOPE.default;
+  }
+
   // The demo's intelligibility() uses a large A to make a clean 0→1
   // per-unit curve; the floor is then applied on top. Baked in here.
   const A_CLEAN = 1e6;
@@ -178,6 +198,10 @@
       this.startLevel = Number(config.startLevel);
       this.nTrials = Math.max(1, Math.round(config.nTrials));
       this.phonemeCount = Math.max(1, Math.round(config.phonemeCount || 4));
+      // Language drives the fixed-slope fallback constant. Fall back to inferring
+      // from phonemeCount (4 = CVCV/Māori, 3 = CVC/English) when not supplied.
+      this.language = config.language ||
+        (this.phonemeCount === 3 ? "english" : "maori");
       this.perUnitFloor = (config.perUnitFloor != null)
         ? Math.min(0.5, Math.max(0, config.perUnitFloor))
         : DEFAULT_PER_UNIT_FLOOR;
@@ -272,7 +296,7 @@
       return { step, next: this.current() };
     }
 
-    // ── Psychometric fit over all accumulated per-phoneme data ──
+    // Psychometric fit over all accumulated per-phoneme data.
     // Returns { srt, slope, nll, converged, n } or null if too little data.
     estimate() {
       const xs = this.fitLevels, ys = this.fitOutcomes;
@@ -297,20 +321,89 @@
       };
 
       const sorted = xs.slice().sort((a, b) => a - b);
+      const lo = sorted[0], hi = sorted[sorted.length - 1];
       const medianX = sorted[Math.floor(sorted.length / 2)];
       const startSRT = isFinite(medianX) ? medianX : this.startLevel;
-      const startSlope = 0.1;   // s50 as a sensible scale
 
-      const res = nelderMead(nll, [startSRT, Math.log(startSlope)], [2.0, 0.5],
-                             { maxIterations: 600, tolerance: 1e-9 });
+      // Multi-start: scattered data can leave a nearly flat likelihood surface, so
+      // a single start can drift to a degenerate corner (near-zero slope, SRT
+      // pushed off past the data). Try several SRT/slope starts and keep the best.
+      const srtStarts = [startSRT, lo + (hi - lo) * 0.25, lo + (hi - lo) * 0.5, lo + (hi - lo) * 0.75];
+      const slopeStarts = [0.05, 0.1, 0.3];
+      let best = null;
+      for (const s0 of srtStarts) {
+        for (const sl0 of slopeStarts) {
+          const r = nelderMead(nll, [s0, Math.log(sl0)], [2.0, 0.5],
+                               { maxIterations: 600, tolerance: 1e-9 });
+          if (r && isFinite(r.fx) && (!best || r.fx < best.fx)) best = r;
+        }
+      }
+      if (!best) return null;
+
+      let srt = best.x[0];
+      let slope = Math.exp(best.x[1]);
+      let converged = best.converged;
+      let degenerate = false;
+      let method = "free-slope";
+
+      // Sanity check the free-slope ML solution. A trustworthy A1 fit puts the 50%
+      // point within (or very near) the tested range, with a slope not pinned at
+      // ~0. If the SRT lands outside the range or the slope collapses, the free
+      // fit is degenerate (weak joint identifiability on scattered data).
+      const pad = Math.max(3, 0.15 * (hi - lo));
+      const inRange = (v) => isFinite(v) && v >= lo - pad && v <= hi + pad;
+      if (!inRange(srt) || slope < 0.01) {
+        degenerate = true;
+      }
+
+      if (degenerate) {
+        // Step 1 — re-fit with the slope HELD FIXED at the language constant,
+        // estimating only the SRT. This keeps the fallback on the same MLE footing
+        // as the good (free-slope) tracks, rather than switching estimator.
+        const fixed = fixedSlopeFor(this.language);
+        const nllFixed = (params) => nll([params[0], Math.log(fixed)]);
+        let bestF = null;
+        for (const s0 of srtStarts) {
+          const r = nelderMead(nllFixed, [s0], [2.0], { maxIterations: 400, tolerance: 1e-9 });
+          if (r && isFinite(r.fx) && (!bestF || r.fx < bestF.fx)) bestF = r;
+        }
+        if (bestF && inRange(bestF.x[0])) {
+          srt = bestF.x[0];
+          slope = fixed;
+          converged = false;      // flag: free fit didn't stand; fixed-slope used
+          method = "fixed-slope";
+        } else {
+          // Step 2 — even fixed-slope MLE didn't land in range: use the fit-free
+          // reversal-mean (last resort).
+          const rb = this.robustSRT();
+          if (rb != null) { srt = rb; slope = null; converged = false; method = "reversal-mean"; }
+        }
+      }
+
       return {
-        srt: res.x[0],
-        slope: Math.exp(res.x[1]),
-        nll: res.fx,
-        converged: res.converged,
+        srt,
+        slope,
+        nll: best.fx,
+        converged,
+        degenerate,
+        method,
         n: xs.length,
         floor
       };
+    }
+
+    // Robust, fit-free SRT for an A1 track: the mean of the reversal levels
+    // (falling back to the mean of the settled second half if reversals weren't
+    // recorded). This is the classic adaptive-threshold estimate and doesn't
+    // depend on fitting a slope, so it survives scattered/non-monotonic data.
+    robustSRT() {
+      const log = Array.isArray(this.log) ? this.log : [];
+      const revLevels = log.filter(e => e && e.reversal && isFinite(e.level)).map(e => e.level);
+      const pick = revLevels.length >= 4
+        ? revLevels
+        : log.slice(Math.floor(log.length / 2)).map(e => e.level).filter(isFinite);
+      if (!pick.length) return null;
+      return pick.reduce((a, b) => a + b, 0) / pick.length;
     }
 
     // Sample the fitted curve for plotting: array of {x, y} across a range.
@@ -405,16 +498,21 @@
   // truncated estimate is computed exactly like the full one. `logEntries` is an
   // array of {level, correct, phonemes}; `floor` defaults to the open-set 0.
   // Returns { srt, slope, nll, converged, n } or null if too little data.
-  function fitFromLog(logEntries, floor = DEFAULT_PER_UNIT_FLOOR) {
+  // `opts.language` (or a phonemeCount inferred from the log) selects the
+  // fixed-slope fallback constant.
+  function fitFromLog(logEntries, floor = DEFAULT_PER_UNIT_FLOOR, opts) {
     const xs = [], ys = [];
+    let inferredPh = null;
     for (const e of (logEntries || [])) {
       const lvl = Number(e.level);
       const ph = Number(e.phonemes) || 0;
       const cor = Number(e.correct) || 0;
       if (!isFinite(lvl) || ph <= 0) continue;
+      if (inferredPh == null) inferredPh = ph;
       for (let i = 0; i < ph; i++) { xs.push(lvl); ys.push(i < cor ? 1 : 0); }
     }
     if (xs.length < 4) return null;
+    const language = (opts && opts.language) || (inferredPh === 3 ? "english" : "maori");
     const nll = (params) => {
       const srt = params[0];
       const slope = Math.exp(params[1]);
@@ -429,10 +527,62 @@
       return s;
     };
     const sorted = xs.slice().sort((a, b) => a - b);
+    const lo = sorted[0], hi = sorted[sorted.length - 1];
     const medianX = sorted[Math.floor(sorted.length / 2)];
-    const res = nelderMead(nll, [isFinite(medianX) ? medianX : 0, Math.log(0.1)],
-                           [2.0, 0.5], { maxIterations: 600, tolerance: 1e-9 });
-    return { srt: res.x[0], slope: Math.exp(res.x[1]), nll: res.fx, converged: res.converged, n: xs.length, floor };
+    const startSRT = isFinite(medianX) ? medianX : 0;
+
+    // Multi-start (see estimate() for rationale: scattered data → flat likelihood).
+    const srtStarts = [startSRT, lo + (hi - lo) * 0.25, lo + (hi - lo) * 0.5, lo + (hi - lo) * 0.75];
+    const slopeStarts = [0.05, 0.1, 0.3];
+    let best = null;
+    for (const s0 of srtStarts) {
+      for (const sl0 of slopeStarts) {
+        const r = nelderMead(nll, [s0, Math.log(sl0)], [2.0, 0.5],
+                             { maxIterations: 600, tolerance: 1e-9 });
+        if (r && isFinite(r.fx) && (!best || r.fx < best.fx)) best = r;
+      }
+    }
+    if (!best) return null;
+
+    let srt = best.x[0];
+    let slope = Math.exp(best.x[1]);
+    let converged = best.converged;
+    let degenerate = false;
+    let method = "free-slope";
+
+    const pad = Math.max(3, 0.15 * (hi - lo));
+    const inRange = (v) => isFinite(v) && v >= lo - pad && v <= hi + pad;
+    if (!inRange(srt) || slope < 0.01) {
+      degenerate = true;
+      // Step 1: fixed-slope MLE (same footing as good tracks).
+      const fixed = fixedSlopeFor(language);
+      const nllFixed = (params) => nll([params[0], Math.log(fixed)]);
+      let bestF = null;
+      for (const s0 of srtStarts) {
+        const r = nelderMead(nllFixed, [s0], [2.0], { maxIterations: 400, tolerance: 1e-9 });
+        if (r && isFinite(r.fx) && (!bestF || r.fx < bestF.fx)) bestF = r;
+      }
+      if (bestF && inRange(bestF.x[0])) {
+        srt = bestF.x[0]; slope = fixed; converged = false; method = "fixed-slope";
+      } else {
+        // Step 2: reversal-mean (last resort).
+        const rb = robustSRTFromLog(logEntries);
+        if (rb != null) { srt = rb; slope = null; converged = false; method = "reversal-mean"; }
+      }
+    }
+    return { srt, slope, nll: best.fx, converged, degenerate, method, n: xs.length, floor };
+  }
+
+  // Fit-free SRT from a log: mean of reversal levels, else mean of the settled
+  // second half. Mirrors AdaptiveSession.robustSRT for the standalone path.
+  function robustSRTFromLog(logEntries) {
+    const log = Array.isArray(logEntries) ? logEntries : [];
+    const rev = log.filter(e => e && e.reversal && isFinite(Number(e.level))).map(e => Number(e.level));
+    const pick = rev.length >= 4
+      ? rev
+      : log.slice(Math.floor(log.length / 2)).map(e => Number(e.level)).filter(isFinite);
+    if (!pick.length) return null;
+    return pick.reduce((a, b) => a + b, 0) / pick.length;
   }
 
   // Rebuild an AdaptiveSession to the exact state captured in a snapshot, by

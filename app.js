@@ -5128,12 +5128,15 @@ function buildAdaptiveReportSections() {
 function fmtDb(v) { return (v == null || !Number.isFinite(Number(v))) ? "—" : Number(v).toFixed(1); }
 
 function srtAtWords(log, nWords) {
-  // Reuse the same ML fitter the CSV uses. Words → phoneme observations happen
-  // inside the log entries; slice by word count.
+  const f = fitAtWords(log, nWords);
+  return f ? f.srt : null;
+}
+// Full fit (srt + method + degenerate flag) over the first nWords of a track.
+function fitAtWords(log, nWords) {
   if (!Array.isArray(log) || !window.Adaptive || typeof window.Adaptive.fitFromLog !== "function") return null;
   const slice = log.slice(0, nWords);
   if (slice.length < 2) return null;
-  try { const f = window.Adaptive.fitFromLog(slice); return f ? f.srt : null; } catch { return null; }
+  try { return window.Adaptive.fitFromLog(slice); } catch { return null; }
 }
 
 function ptaForEar(ear) {
@@ -5205,9 +5208,12 @@ function buildParticipantSummaryPage() {
   // Build per-track rows with SRT@20 / SRT@30 / difference + reliability.
   const rows = tracks.map((t, i) => {
     const ear = t.stimulusEar || t.condition || "";
-    const srt30 = (t.srt != null) ? Number(t.srt) : srtAtWords(t.log, 30);
+    const fit30 = fitAtWords(t.log, 30);
+    const srt30 = (t.srt != null) ? Number(t.srt) : (fit30 ? fit30.srt : null);
     const srt20 = srtAtWords(t.log, 20);
     const diff = (srt30 != null && srt20 != null) ? (srt30 - srt20) : null;
+    // Fit method: prefer a stored flag (e.g. corrected files), else the live fit.
+    const method = t.srtMethod || (fit30 ? fit30.method : null);
     return {
       idx: i,
       language: t.language || "maori",
@@ -5216,6 +5222,8 @@ function buildParticipantSummaryPage() {
       srt20, srt30, diff,
       reversals: trackReversals(t.log),
       seSrt: trackSrtSE(t.log),
+      method,
+      degenerate: !!(t.srtDegenerate || (fit30 && fit30.degenerate)),
       converged: t.fitConverged,
       timestamp: t.timestamp || ""
     };
@@ -5240,7 +5248,7 @@ function buildParticipantSummaryPage() {
       <td>${fmtDb(r.diff)}</td>
       <td>${r.reversals == null ? "—" : r.reversals}</td>
       <td>${fmtNum(r.seSrt)}</td>
-      <td>${r.converged ? "" : "not converged"}</td>
+      <td>${r.degenerate ? (r.method === "reversal-mean" ? "reversal-mean" : "fixed-slope") : ""}</td>
     </tr>`).join("");
 
   // Paired Māori−English differences at SRT(30), matched by ear + repeat.
@@ -5293,13 +5301,16 @@ function buildParticipantSummaryPage() {
       <table class="report-table">
         <thead><tr><th>Test</th><th>Ear</th><th>Rep</th><th>Lists</th>
           <th>SRT@20 dB(A)</th><th>SRT@30 dB(A)</th><th>Δ(30−20)</th>
-          <th>Reversals</th><th>SE dB</th><th>Fit</th></tr></thead>
+          <th>Reversals</th><th>SE dB</th><th>Fit method</th></tr></thead>
         <tbody>${trackRows}</tbody>
       </table>
       <p class="report-pi-legend"><b>Reliability:</b> Reversals = staircase direction changes
       (more = a more stable threshold); SE = standard error of the SRT (SD of the settled
       presentation levels ÷ √n; smaller = more precise). Preferred over slope, which A1 leaves
-      weakly determined. Interpretation/flagging to follow.</p>
+      weakly determined. <b>Fit method</b> is blank for the normal free-slope MLE; it reads
+      "fixed-slope" when the free fit was degenerate and the SRT was re-fit with the slope held at
+      the language constant (Māori 0.073, English 0.076, from our own data), or "reversal-mean" as a
+      last resort. Those tracks warrant a look. Interpretation/flagging to follow.</p>
       ${pairRows.length ? `
         <h3>Paired Māori − English (SRT@30, matched ear &amp; repeat)</h3>
         <table class="report-table">
