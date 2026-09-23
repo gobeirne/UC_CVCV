@@ -167,6 +167,38 @@ const state = { files: [], records: [] };
 
 /* ── Minimal statistics (self-contained) ──────────────────────────────── */
 const S = {
+  // Paired x/y summary for the Māori-vs-English scatter: OLS fit, correlation,
+  // Lin's concordance (agreement with y = x) and a Deming slope.
+  regress: pts => {
+    const n=pts.length; if (n<3) return null;
+    const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y), mx=S.mean(xs), my=S.mean(ys);
+    let sxx=0, syy=0, sxy=0;
+    pts.forEach(p=>{ const dx=p.x-mx, dy=p.y-my; sxx+=dx*dx; syy+=dy*dy; sxy+=dx*dy; });
+    if (sxx===0 || syy===0) return null;
+    const slope=sxy/sxx, intercept=my-slope*mx, df=n-2;
+    const r=sxy/Math.sqrt(sxx*syy);
+    const rss=pts.reduce((s,p)=>s+(p.y-(intercept+slope*p.x))**2,0), sres=Math.sqrt(rss/df);
+    const seSlope=sres/Math.sqrt(sxx), seInt=sres*Math.sqrt(1/n+mx*mx/sxx);
+    const t=S.tinv(0.975, df);
+    const tr=r*Math.sqrt(df/Math.max(1e-12,1-r*r)), pR=2*(1-S.tcdf(Math.abs(tr),df));
+    let rCI=null; if (n>=4){ const z=Math.atanh(Math.min(r,0.999999)), se=1/Math.sqrt(n-3);
+      rCI=[Math.tanh(z-1.96*se), Math.tanh(z+1.96*se)]; }
+    // Spearman: Pearson on (tie-averaged) ranks
+    const rank=a=>{ const o=a.map((v,i)=>[v,i]).sort((p,q)=>p[0]-q[0]), rk=new Array(a.length);
+      for(let i=0;i<o.length;){ let j=i; while(j+1<o.length&&o[j+1][0]===o[i][0]) j++;
+        for(let k=i;k<=j;k++) rk[o[k][1]]=(i+j)/2+1; i=j+1; } return rk; };
+    const rx=rank(xs), ry=rank(ys), mrx=S.mean(rx), mry=S.mean(ry);
+    let a=0,b=0,c=0; rx.forEach((v,i)=>{ a+=(v-mrx)*(ry[i]-mry); b+=(v-mrx)**2; c+=(ry[i]-mry)**2; });
+    const rho=(b&&c)?a/Math.sqrt(b*c):NaN;
+    // Lin's CCC (population moments, as in Lin 1989)
+    const ccc=2*(sxy/n)/((sxx/n)+(syy/n)+(mx-my)**2);
+    // Deming, equal error variances (orthogonal regression)
+    const dSlope=(syy-sxx+Math.sqrt((syy-sxx)**2+4*sxy*sxy))/(2*sxy), dInt=my-dSlope*mx;
+    // 95% confidence band for the fitted mean
+    const band=x0=>{ const h=t*sres*Math.sqrt(1/n+(x0-mx)**2/sxx), yh=intercept+slope*x0; return [yh-h, yh+h]; };
+    return { n, slope, intercept, seSlope, seInt, t, r, r2:r*r, pR, rCI, rho, ccc, sres,
+             dSlope, dInt, band, xmin:Math.min(...xs), xmax:Math.max(...xs) };
+  },
   mean: a => a.length ? a.reduce((s,x)=>s+x,0)/a.length : NaN,
   sd: a => { if (a.length<2) return NaN; const m=S.mean(a);
              return Math.sqrt(a.reduce((s,x)=>s+(x-m)**2,0)/(a.length-1)); },
@@ -461,18 +493,42 @@ function step2(P) {
 function step1plots(P) {
   const host = document.getElementById('plots');
   if (P.length < 1) { host.innerHTML = '<p class="empty">No paired data to plot.</p>'; return; }
-  const s1 = scatter(P.map(p=>({x:p.english, y:p.maori})),
-    'English SRT dB(A)', 'Māori SRT dB(A)', true);
+  const xy = P.map(p=>({x:p.english, y:p.maori}));
+  const fit = S.regress(xy);
+  const s1 = scatter(xy, 'English SRT dB(A)', 'Māori SRT dB(A)', true, fit);
+  const sgn = v => v<0 ? '−' : '+';
+  const pTxt = p => p<0.001 ? '&lt; 0.001' : '= '+p.toFixed(3);
+  const fitBox = fit ? `
+    <dl class="stat">
+      <dt>OLS fit</dt><dd class="mono">y = ${fit.slope.toFixed(2)}x ${sgn(fit.intercept)} ${Math.abs(fit.intercept).toFixed(1)}</dd>
+      <dt>Slope (95% CI)</dt><dd>${fmt(fit.slope,2)} (${fmt(fit.slope-fit.t*fit.seSlope,2)} to ${fmt(fit.slope+fit.t*fit.seSlope,2)})</dd>
+      <dt>Intercept (95% CI)</dt><dd>${fmt(fit.intercept)} (${fmt(fit.intercept-fit.t*fit.seInt)} to ${fmt(fit.intercept+fit.t*fit.seInt)}) dB</dd>
+      <dt>Pearson r${fit.rCI?' (95% CI)':''}</dt><dd>${fmt(fit.r,3)}${fit.rCI?` (${fmt(fit.rCI[0],2)} to ${fmt(fit.rCI[1],2)})`:''}, p ${pTxt(fit.pR)}</dd>
+      <dt>R²</dt><dd>${fmt(fit.r2,3)}</dd>
+      <dt>Spearman ρ</dt><dd>${fmt(fit.rho,3)}</dd>
+      <dt>Lin's concordance ρ<sub>c</sub></dt><dd>${fmt(fit.ccc,3)}</dd>
+      <dt>Residual SD about the line</dt><dd>${fmt(fit.sres)} dB</dd>
+      <dt>Deming fit (equal error variances)</dt><dd class="mono">y = ${fit.dSlope.toFixed(2)}x ${sgn(fit.dInt)} ${Math.abs(fit.dInt).toFixed(1)}</dd>
+      <dt>Pairs (n)</dt><dd>${fit.n}</dd>
+    </dl>
+    <div class="note">Correlation (r, ρ) shows the two tests <em>rank</em> people alike; it doesn't show they
+    <em>agree</em> — a constant 10 dB offset still gives r = 1. Lin's ρ<sub>c</sub> is the agreement measure: it
+    is r penalised for any departure from the y = x line (1 = perfect agreement). The OLS slope is pulled below 1
+    by measurement error in the English SRTs (regression dilution), so the Deming slope, which allows error on
+    both axes, is the fairer test of "slope = 1". As elsewhere on this page, ears and repeats are treated as
+    independent, so the CIs and p-value are optimistic.</div>` : '';
   const withPta = P.filter(p=>p.pta!=null);
   const s2 = withPta.length
     ? scatter(withPta.map(p=>({x:p.pta, y:p.diff})), 'PTA dB HL', 'Māori−English diff dB', false)
     : `<p class="empty">No PTA saved in these files — enter the audiogram in the app so PTA travels with the export.</p>`;
   host.innerHTML =
-    `<figure>${s1}<figcaption>Each point is one ear × repeat. The dashed line is equality (y = x).</figcaption></figure>
+    `<figure>${s1}<figcaption>Each point is one ear × repeat. Dashed grey: equality (y = x). Solid: least-squares
+       fit with its shaded 95% confidence band${fit?'':' (needs ≥3 pairs with spread on both axes)'}.</figcaption></figure>${fitBox}
      <figure>${s2}<figcaption>Method difference against hearing level. A slope here would mean a single correction isn't safe across severity (Step 5).</figcaption></figure>`;
 }
 
-function scatter(pts, xlab, ylab, identity) {
+let clipSeq = 0;
+function scatter(pts, xlab, ylab, identity, fit=null) {
   const W=640,H=360,m={l:56,r:16,t:16,b:44};
   const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
   const all = identity ? xs.concat(ys) : xs;
@@ -493,9 +549,30 @@ function scatter(pts, xlab, ylab, identity) {
   if (identity){ const lo=Math.max(xmin,ymin),hi=Math.min(xmax,ymax);
     extra=`<line x1="${X(lo)}" y1="${Y(lo)}" x2="${X(hi)}" y2="${Y(hi)}" stroke="#8fa1a8" stroke-dasharray="4 4"/>`; }
   else { extra=`<line x1="${m.l}" y1="${Y(0)}" x2="${W-m.r}" y2="${Y(0)}" stroke="#8fa1a8" stroke-dasharray="4 4"/>`; }
+  let fitSvg='', legend='', clip='';
+  if (fit) {
+    const id='plotclip'+(++clipSeq);
+    clip=`<defs><clipPath id="${id}"><rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}"/></clipPath></defs>`;
+    const N=40, xa=[]; for(let i=0;i<=N;i++) xa.push(fit.xmin+(fit.xmax-fit.xmin)*i/N);
+    const up=xa.map(x=>`${X(x).toFixed(1)},${Y(fit.band(x)[1]).toFixed(1)}`);
+    const dn=xa.slice().reverse().map(x=>`${X(x).toFixed(1)},${Y(fit.band(x)[0]).toFixed(1)}`);
+    const yl=fit.intercept+fit.slope*fit.xmin, yr=fit.intercept+fit.slope*fit.xmax;
+    fitSvg=`<g clip-path="url(#${id})">
+      <polygon points="${up.concat(dn).join(' ')}" fill="#1f8a70" fill-opacity="0.12"/>
+      <line x1="${X(fit.xmin)}" y1="${Y(yl)}" x2="${X(fit.xmax)}" y2="${Y(yr)}" stroke="#1f8a70" stroke-width="2"/></g>`;
+    const eq=`y = ${fit.slope.toFixed(2)}x ${fit.intercept<0?'−':'+'} ${Math.abs(fit.intercept).toFixed(1)}`;
+    const lx=m.l+12, ly=m.t+10;
+    legend=`<g font-size="11.5" fill="#16232b">
+      <rect x="${lx-6}" y="${ly-4}" width="196" height="62" rx="5" fill="#fff" fill-opacity="0.9" stroke="#dbe1e0"/>
+      <line x1="${lx}" y1="${ly+8}" x2="${lx+22}" y2="${ly+8}" stroke="#1f8a70" stroke-width="2"/>
+      <text x="${lx+28}" y="${ly+12}" font-family="ui-monospace, Menlo, Consolas, monospace">${eq}</text>
+      <line x1="${lx}" y1="${ly+26}" x2="${lx+22}" y2="${ly+26}" stroke="#8fa1a8" stroke-dasharray="4 4"/>
+      <text x="${lx+28}" y="${ly+30}">y = x (equality)</text>
+      <text x="${lx}" y="${ly+48}">r = ${fit.r.toFixed(3)}  R² = ${fit.r2.toFixed(3)}  ρc = ${fit.ccc.toFixed(3)}</text></g>`;
+  }
   const dots=pts.map(p=>`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="4.5" fill="#2a6f97" fill-opacity="0.75" stroke="#16232b" stroke-width=".5"/>`).join('');
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${ylab} versus ${xlab}">
-    ${g}${extra}${dots}
+    ${clip}${g}${extra}${fitSvg}${dots}${legend}
     <text x="${m.l+(W-m.l-m.r)/2}" y="${H-6}" font-size="12" fill="#4a5b64" text-anchor="middle">${xlab}</text>
     <text x="16" y="${m.t+(H-m.t-m.b)/2}" font-size="12" fill="#4a5b64" text-anchor="middle" transform="rotate(-90 16 ${m.t+(H-m.t-m.b)/2})">${ylab}</text>
   </svg>`;
