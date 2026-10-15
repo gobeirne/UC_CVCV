@@ -178,8 +178,10 @@
           <option value="band">Estimate from a te reo proficiency band</option>
           <option value="manual">Enter a value</option>
         </select></label>
-      <label class="offBand">TRM prof from <select id="offMin"></select></label>
+      <label class="offBand">TRM prof (1 = most proficient) from <select id="offMin"></select></label>
       <label class="offBand">to <select id="offMax"></select></label>
+      <label class="offBand">and test-ear PTA below (dB HL)
+        <input type="text" id="offPta" value="" placeholder="no limit" title="Blank = no hearing criterion. Uses the PTA source chosen above."></label>
       <label class="offManual">Offset (dB) <input type="text" id="offManual" value="0"></label>
       <label class="offAny">Apply the correction to
         <select id="offTarget">
@@ -692,7 +694,7 @@ function run(scroll = true) {
   state.offset = computeOffset();
   applyOffset();
   state.cur = filteredRecords();
-  if (state.offset.excludePids) state.cur = state.cur.filter(r => !state.offset.excludePids.has(r.participant));
+  if (state.offset.excludeKeys) state.cur = state.cur.filter(r => !state.offset.excludeKeys.has(r.participant + '|' + r.ear));
   renderFilterBanner();
   renderOffsetBox();
   const P = pairs();
@@ -1147,9 +1149,12 @@ function segmentDefs() {
     defs.push({ id:'ethTot', label:'Ethnicity — total response (groups overlap)', multi: true, order: ord, get: d => d.ethList });
   }
   if (D.col.trm >= 0) {
-    defs.push({ id:'trm', label:'Te reo Māori proficiency (each level)', get: d => d.trm != null ? ['level ' + d.trm] : [] });
-    defs.push({ id:'trmGrp', label:'Te reo Māori proficiency (1–2 / 3 / 4–5)', order:['1–2','3','4–5'],
-      get: d => d.trm == null ? [] : [d.trm <= 2 ? '1–2' : d.trm < 4 ? '3' : '4–5'] });
+    // TRM prof: 1 = most proficient, 5 = least.
+    const trmLab = v => v === 1 ? 'level 1 (most proficient)' : v === 5 ? 'level 5 (least proficient)' : 'level ' + v;
+    defs.push({ id:'trm', label:'Te reo Māori proficiency (each level; 1 = most)', get: d => d.trm != null ? [trmLab(d.trm)] : [] });
+    defs.push({ id:'trmGrp', label:'Te reo Māori proficiency (1–2 / 3 / 4–5)',
+      order:['1–2 (more proficient)','3','4–5 (less proficient)'],
+      get: d => d.trm == null ? [] : [d.trm <= 2 ? '1–2 (more proficient)' : d.trm < 4 ? '3' : '4–5 (less proficient)'] });
   }
   D.extraCols.filter(c => !c.numeric).forEach(c =>
     defs.push({ id:'x:' + c.name, label: c.name, get: d => d.extra[c.name] != null ? [d.extra[c.name]] : [] }));
@@ -1421,7 +1426,7 @@ function demoVars() {
   if (!D || D.error) return out;
   const v = (key, label, get) => out.push({ key, label, get: row => { const d = demoFor(row.pid); return d ? fin(get(d)) : null; } });
   if (D.col.age >= 0) v('age', 'Age (years)', d => d.age);
-  if (D.col.trm >= 0) v('trm', 'Te reo Māori proficiency (TRM prof)', d => d.trm);
+  if (D.col.trm >= 0) v('trm', 'Te reo Māori proficiency (TRM prof; 1 = most, 5 = least)', d => d.trm);
   if (D.ethCols.length) v('ethCount', 'Number of ethnicities ticked', d => d.ethCount);
   D.ethCols.forEach(c => v(c.key, `Ethnicity: ${c.label} (0/1)`, d => d.eth[c.key]));
   D.extraCols.filter(c => c.numeric).forEach(c => v('x:' + c.name, c.name, d => d.extra[c.name]));
@@ -1632,14 +1637,23 @@ function computeOffsetValue() {
   if (mode === 'manual') { const v = Number($('offManual').value); return { mode, value: Number.isFinite(v) ? v : 0 }; }
   if (mode !== 'band') return { mode: 'none', value: 0 };
   const lo = Number($('offMin').value), hi = Number($('offMax').value);
+  const ptaTxt = $('offPta').value.trim(), ptaMax = ptaTxt === '' ? null : Number(ptaTxt);
+  const ptaLim = Number.isFinite(ptaMax) ? ptaMax : null;
   const inBand = loadedPids().filter(p => { const d = demoFor(p); return d && d.trm != null && d.trm >= lo && d.trm <= hi; });
-  const raw = state.records.filter(r => inBand.includes(r.participant)).map(r => ({ ...r, srt30: r.srt30raw }));
+  // Hearing criterion is per ear (pairs are per ear): an ear qualifies if its PTA is below the limit.
+  const okEar = r => ptaLim === null || (r.pta != null && r.pta < ptaLim);
+  const raw = state.records.filter(r => inBand.includes(r.participant) && okEar(r)).map(r => ({ ...r, srt30: r.srt30raw }));
+  const calKeys = new Set(raw.map(r => r.participant + '|' + r.ear));
+  const earsDropped = new Set(state.records.filter(r => inBand.includes(r.participant) && !okEar(r)).map(r => r.participant + '|' + r.ear)).size;
   const P = pairs(raw);
   const perP = Object.entries(groupBy(P, p => p.participant))
     .map(([pid, pp]) => ({ pid, n: pp.length, diff: S.mean(pp.map(p => p.diff)) }))
     .sort((a, b) => a.pid.localeCompare(b.pid, undefined, { numeric: true }));
-  const base = { mode, lo, hi, perP, nBand: inBand.length,
-    excludePids: $('offExclude').checked ? new Set(inBand) : null };
+  const base = { mode, lo, hi, ptaLim, earsDropped, perP, nBand: inBand.length, nEars: calKeys.size,
+    // Leaving the calibration set out drops those PEOPLE entirely (both ears): proficiency is a
+    // person-level trait, so their other ear isn't an independent check.
+    excludeKeys: $('offExclude').checked ? new Set(state.records.filter(r => [...calKeys].some(k => k.startsWith(r.participant + '|')))
+      .map(r => r.participant + '|' + r.ear)) : null };
   if (!perP.length) return { ...base, value: 0, n: 0, empty: true };
   const v = perP.map(x => x.diff), n = v.length, mean = S.mean(v), sd = S.sd(v);
   const ci = n >= 2 ? (t => [mean - t*sd/Math.sqrt(n), mean + t*sd/Math.sqrt(n)])(S.tinv(0.975, n-1)) : null;
@@ -1681,9 +1695,10 @@ function renderOffsetBox() {
   let est = '';
   if (o.mode === 'band') {
     if (o.empty) { host.innerHTML = `<div class="note"><b>Acoustic offset:</b> no participants with matched pairs have
-      TRM prof ${o.lo}–${o.hi}${state.demo ? '' : ' (load the demographics spreadsheet)'} — no adjustment applied.</div>`; return; }
+      TRM prof ${o.lo}–${o.hi}${o.ptaLim !== null ? ` with test-ear PTA &lt; ${o.ptaLim} dB HL` : ''}${state.demo ? '' : ' (load the demographics spreadsheet)'} — no adjustment applied.</div>`; return; }
     est = `<dl class="stat">
-        <dt>Calibration band</dt><dd>TRM prof ${o.lo}–${o.hi}: ${o.n} participant(s), ${o.nPairs} pair(s)</dd>
+        <dt>Calibration set</dt><dd>TRM prof ${o.lo}–${o.hi}${o.ptaLim !== null ? `, test-ear PTA &lt; ${o.ptaLim} dB HL` : ''}:
+          ${o.n} participant(s), ${o.nEars} ear(s), ${o.nPairs} pair(s)${o.earsDropped ? `<br><span style="color:var(--mist)">${o.earsDropped} ear(s) of in-band participants excluded by the PTA limit</span>` : ''}</dd>
         <dt>Offset = mean of per-participant mean (Māori − English)</dt><dd><b>${fmt(o.value,2)} dB</b></dd>
         <dt>95% CI for the offset</dt><dd>${o.ci ? `${fmt(o.ci[0],2)} to ${fmt(o.ci[1],2)} dB` : '— (needs ≥2 people)'}</dd>
         <dt>SD between participants</dt><dd>${fmt(o.sd,2)} dB</dd>
@@ -1691,7 +1706,7 @@ function renderOffsetBox() {
       </dl>
       <p class="sub" style="font-size:.85rem">Per participant: ${o.perP.map(x => `P${esc(x.pid)} ${fmt(x.diff,1)}`).join(' · ')}.
       Estimated from all loaded participants in the band, regardless of the restriction above.</p>
-      ${o.excludePids ? `<div class="note">The ${o.nBand} calibration participant(s) are <b>left out</b> of every analysis below,
+      ${o.excludeKeys ? `<div class="note">The ${o.n} calibration participant(s) are <b>left out</b> of every analysis below (both ears — proficiency is a person-level trait),
         so the adjusted results are an independent check of the offset on everyone else.</div>`
       : `<div class="note">The calibration participants are still <b>in</b> the analyses below, so their own mean difference
         is ≈ 0 by construction and the overall bias is pulled toward 0. Tick “Leave the calibration band out” for an
@@ -1733,8 +1748,9 @@ function populateOffsetSelects() {
   const levels = lv.length ? lv : [1, 2, 3, 4, 5];
   const opts = levels.map(v => ({ value: String(v), label: String(v) }));
   const mn = $('offMin'), mx = $('offMax');
-  fillSelect(mn, opts, mn.value || String(levels.includes(4) ? 4 : levels[levels.length - 1]));
-  fillSelect(mx, opts, mx.value || String(levels[levels.length - 1]));
+  // Default calibration band: the most proficient speakers, TRM 1–3 (1 = most proficient).
+  fillSelect(mn, opts, mn.value || String(levels[0]));
+  fillSelect(mx, opts, mx.value || String(levels.includes(3) ? 3 : levels[levels.length - 1]));
   offsetVisibility();
 }
 function offsetVisibility() {
@@ -1997,7 +2013,7 @@ function xyChart({ pts, ghost = [], groups = [], xlab, ylab, identity = false, f
 }
 
 /* ── Control wiring ───────────────────────────────────────────────────── */
-['offMode','offMin','offMax','offManual','offExclude','offTarget','naSlope','naFloor'].forEach(id =>
+['offMode','offMin','offMax','offPta','offManual','offExclude','offTarget','naSlope','naFloor'].forEach(id =>
   $(id).addEventListener('change', () => { offsetVisibility(); rerun(); }));
 document.getElementById('filterVar').onchange = () => { populateFilterVals(); rerun(); };
 document.getElementById('filterVal').onchange = rerun;
