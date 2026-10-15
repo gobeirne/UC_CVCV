@@ -575,6 +575,10 @@ function run(scroll = true) {
   state.cur = filteredRecords();
   renderFilterBanner();
   const P = pairs();
+  // When a restriction is active, excluded participants are drawn as faint grey ghosts on fixed
+  // full-data axes, so the restricted plot is visibly a subset rather than a rescaled look-alike.
+  const curPids = new Set(state.cur.map(r => r.participant));
+  ghostP = state.cur.length === state.records.length ? [] : pairs(state.records).filter(p => !curPids.has(p.participant));
   document.getElementById('results').classList.remove('hidden');
   step2(P);
   step1plots(P);
@@ -588,6 +592,7 @@ function run(scroll = true) {
   explorer();
   if (scroll) document.getElementById('results').scrollIntoView({behavior:'smooth', block:'start'});
 }
+let ghostP = [];
 const rerun = () => { if (!document.getElementById('results').classList.contains('hidden')) run(false); };
 
 function fmt(v, d=1){ return (v==null||!Number.isFinite(v))?'—':v.toFixed(d); }
@@ -645,7 +650,7 @@ function step1plots(P) {
   if (P.length < 1) { host.innerHTML = '<p class="empty">No paired data to plot.</p>'; return; }
   const xy = P.map(p=>({x:p.english, y:p.maori}));
   const fit = S.regress(xy);
-  const s1 = scatter(xy, 'English SRT dB(A)', 'Māori SRT dB(A)', true, fit);
+  const s1 = scatter(xy, 'English SRT dB(A)', 'Māori SRT dB(A)', true, fit, ghostP.map(p=>({x:p.english, y:p.maori})));
   const sgn = v => v<0 ? '−' : '+';
   const pTxt = p => p<0.001 ? '&lt; 0.001' : '= '+p.toFixed(3);
   const fitBox = fit ? `
@@ -669,18 +674,21 @@ function step1plots(P) {
     independent, so the CIs and p-value are optimistic.</div>` : '';
   const withPta = P.filter(p=>p.pta!=null);
   const s2 = withPta.length
-    ? scatter(withPta.map(p=>({x:p.pta, y:p.diff})), 'PTA dB HL', 'Māori−English diff dB', false)
+    ? scatter(withPta.map(p=>({x:p.pta, y:p.diff})), 'PTA dB HL', 'Māori−English diff dB', false, null, ghostP.filter(p=>p.pta!=null).map(p=>({x:p.pta, y:p.diff})))
     : `<p class="empty">No PTA saved in these files — enter the audiogram in the app so PTA travels with the export.</p>`;
   host.innerHTML =
-    `<figure>${s1}<figcaption>Each point is one ear × repeat. Dashed grey: equality (y = x). Solid: least-squares
+    `<figure>${s1}<figcaption>${ghostNote(P.length)}Each point is one ear × repeat. Dashed grey: equality (y = x). Solid: least-squares
        fit with its shaded 95% confidence band${fit?'':' (needs ≥3 pairs with spread on both axes)'}.</figcaption></figure>${fitBox}
-     <figure>${s2}<figcaption>Method difference against hearing level. A slope here would mean a single correction isn't safe across severity (Step 5).</figcaption></figure>`;
+     <figure>${s2}<figcaption>${ghostNote(withPta.length)}Method difference against hearing level. A slope here would mean a single correction isn't safe across severity (Step 5).</figcaption></figure>`;
 }
 
 let clipSeq = 0;
-function scatter(pts, xlab, ylab, identity, fit=null) {
+function ghostNote(n) {
+  return ghostP.length ? `<b>Restricted: ${n} point(s) shown in blue; ${ghostP.length} excluded pair(s) as grey rings for context.</b> ` : '';
+}
+function scatter(pts, xlab, ylab, identity, fit=null, ghost=[]) {
   const W=640,H=360,m={l:56,r:16,t:16,b:44};
-  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  const xs=pts.concat(ghost).map(p=>p.x), ys=pts.concat(ghost).map(p=>p.y);
   const all = identity ? xs.concat(ys) : xs;
   let xmin=Math.min(...all), xmax=Math.max(...all), ymin=Math.min(...ys), ymax=Math.max(...ys);
   if (identity){ xmin=ymin=Math.min(xmin,ymin); xmax=ymax=Math.max(xmax,ymax); }
@@ -720,7 +728,8 @@ function scatter(pts, xlab, ylab, identity, fit=null) {
       <text x="${lx+28}" y="${ly+30}">y = x (equality)</text>
       <text x="${lx}" y="${ly+48}">r = ${fit.r.toFixed(3)}  R² = ${fit.r2.toFixed(3)}  ρc = ${fit.ccc.toFixed(3)}</text></g>`;
   }
-  const dots=pts.map(p=>`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="4.5" fill="#2a6f97" fill-opacity="0.75" stroke="#16232b" stroke-width=".5"/>`).join('');
+  const dots=ghost.map(p=>`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="4" fill="none" stroke="#b9c4c8" stroke-width="1"/>`).join('')
+    + pts.map(p=>`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="4.5" fill="#2a6f97" fill-opacity="0.75" stroke="#16232b" stroke-width=".5"/>`).join('');
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${ylab} versus ${xlab}">
     ${clip}${g}${extra}${fitSvg}${dots}${legend}
     <text x="${m.l+(W-m.l-m.r)/2}" y="${H-6}" font-size="12" fill="#4a5b64" text-anchor="middle">${xlab}</text>
@@ -804,13 +813,14 @@ function step4(P) {
   const loa=[m-1.96*sd, m+1.96*sd];
   // BA plot: mean vs difference
   const pts = P.map(p=>({x:(p.maori+p.english)/2, y:p.diff}));
-  const plot = baPlot(pts, m, loa);
+  const plot = scatter(pts, 'mean of Māori & English SRT dB(A)', 'difference dB', false, null,
+    ghostP.map(p=>({x:(p.maori+p.english)/2, y:p.diff})));
   host.innerHTML = `
     <dl class="stat">
       <dt>Bias (mean difference)</dt><dd>${fmt(m)} dB</dd>
       <dt>95% limits of agreement</dt><dd>${fmt(loa[0])} to ${fmt(loa[1])} dB</dd>
     </dl>
-    <figure>${plot}<figcaption>Difference vs mean of the two tests. Dashed: bias and ±1.96 SD limits.</figcaption></figure>
+    <figure>${plot}<figcaption>${ghostNote(P.length)}Difference vs mean of the two tests. Dashed: bias and ±1.96 SD limits.</figcaption></figure>
     <div class="note">These are <b>naïve</b> limits: they treat every ear/repeat as an independent subject.
     The plan calls for the <b>repeated-measures</b> Bland–Altman (single-administration) which widens the limits
     correctly for the clustering — a small R computation. Use these only to eyeball outliers and rough width.</div>`;
@@ -1312,8 +1322,8 @@ function earPtaVars() {
 }
 
 // Builds { rows, vars } for the chosen unit. Each row: { pid, ear?, lang?, tip, data } and vars read from it.
-function explorerData(level) {
-  const recs = state.cur, P = pairs(recs);
+function explorerData(level, recs = state.cur) {
+  const P = pairs(recs);
   const fv = (key, label, field) => ({ key, label, get: r => fin(r.data[field]) });
   let rows = [], vars = [];
   if (level === 'track') {
@@ -1396,10 +1406,13 @@ function explorer() {
   fillSelect(xs, opts, keepX); fillSelect(ys, opts, keepY);
   const colourDefs = [...BUILTIN_COLOUR.filter(c => c.levels.includes(level)), ...segmentDefs().filter(d => !d.multi)];
   fillSelect(cs, [{ value:'', label:'— none —' }, ...colourDefs.map(d => ({ value: d.id, label: d.label }))]);
-  explorerPlot(rows, vars, colourDefs, level);
+  const curPids = new Set(rows.map(r => r.pid));
+  const ghostRows = state.cur.length === state.records.length ? []
+    : explorerData(level, state.records).rows.filter(r => !curPids.has(r.pid));
+  explorerPlot(rows, vars, colourDefs, level, ghostRows);
   corrMatrix(rows, vars);
 }
-function explorerPlot(rows, vars, colourDefs, level) {
+function explorerPlot(rows, vars, colourDefs, level, ghostRows = []) {
   const host = document.getElementById('xPlot');
   const xv = vars.find(v => v.key === document.getElementById('xVar').value);
   const yv = vars.find(v => v.key === document.getElementById('yVar').value);
@@ -1420,8 +1433,10 @@ function explorerPlot(rows, vars, colourDefs, level) {
   const useFit = document.getElementById('xFit').checked && fit, useId = document.getElementById('xIdentity').checked;
 
   const W = 640, H = 400, m = { l: 60, r: 16, t: 16, b: 48 };
-  let xmin = Math.min(...pts.map(p => p.x)), xmax = Math.max(...pts.map(p => p.x));
-  let ymin = Math.min(...pts.map(p => p.y)), ymax = Math.max(...pts.map(p => p.y));
+  const ghost = ghostRows.map(r => ({ x: xv.get(r), y: yv.get(r), tip: r.tip })).filter(p => p.x !== null && p.y !== null);
+  const all = pts.concat(ghost);
+  let xmin = Math.min(...all.map(p => p.x)), xmax = Math.max(...all.map(p => p.x));
+  let ymin = Math.min(...all.map(p => p.y)), ymax = Math.max(...all.map(p => p.y));
   if (useId) { xmin = ymin = Math.min(xmin, ymin); xmax = ymax = Math.max(xmax, ymax); }
   const px = (xmax - xmin || 2) * 0.08, py = (ymax - ymin || 2) * 0.08;
   xmin -= px; xmax += px; ymin -= py; ymax += py;
@@ -1444,7 +1459,8 @@ function explorerPlot(rows, vars, colourDefs, level) {
       <line x1="${X(fit.xmin)}" y1="${Y(fit.intercept + fit.slope * fit.xmin)}" x2="${X(fit.xmax)}" y2="${Y(fit.intercept + fit.slope * fit.xmax)}" stroke="#1f8a70" stroke-width="2"/>`;
   }
   over += '</g>';
-  const dots = pts.map(p => { const s = style(p.g);
+  const ghostDots = ghost.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="4.5" fill="none" stroke="#b9c4c8" stroke-width="1"><title>${esc(p.tip)} (excluded by restriction)</title></circle>`).join('');
+  const dots = ghostDots + pts.map(p => { const s = style(p.g);
     return markSvg(s.s, X(p.x), Y(p.y), 5, s.c, `${p.tip}${p.g ? ' · ' + p.g : ''}\n${xv.label}: ${fmt(p.x,2)}\n${yv.label}: ${fmt(p.y,2)}`); }).join('');
   const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(yv.label)} versus ${esc(xv.label)}">${g}${over}${dots}
     <text x="${m.l+(W-m.l-m.r)/2}" y="${H-8}" font-size="12" fill="#4a5b64" text-anchor="middle">${esc(xv.label)}</text>
@@ -1470,7 +1486,7 @@ function explorerPlot(rows, vars, colourDefs, level) {
   const caveat = level === 'participant'
     ? 'One point per participant, so the points are independent and the p-value is fair (if small-sample).'
     : `At this unit each participant contributes several points (${level === 'ear' ? 'two ears' : 'ears × repeats'}), so they are not independent: r is a fair description but the CI and p-value are too optimistic. Switch to “Per participant” for an honest test.`;
-  host.innerHTML = `<figure>${svg}${legend}<figcaption>Hover a point for its participant and values.</figcaption></figure>
+  host.innerHTML = `<figure>${svg}${legend}<figcaption>${ghost.length ? `<b>Restricted: ${pts.length} point(s) shown; ${ghost.length} excluded as grey rings for context (not in the statistics).</b> ` : ''}Hover a point for its participant and values.</figcaption></figure>
     ${stats}${byG ? `<table style="max-width:30rem"><thead><tr><th>${esc(cdef.label)}</th><th class="num">n</th><th class="num">r</th><th class="num">p</th></tr></thead><tbody>${byG}</tbody></table>` : ''}
     <div class="note">${caveat} Correlation is not agreement — for Māori vs English SRT use Lin's ρ<sub>c</sub> in Step 1.</div>`;
 }
