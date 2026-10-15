@@ -1,0 +1,1942 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Cache-Control" content="no-cache, must-revalidate">
+<title>CVCV / CVC equivalence — analysis workbench</title>
+<style>
+  /* ── Design tokens ──────────────────────────────────────────────────────
+     Subject: a validation workbench for two audiologists (not statisticians)
+     comparing a Māori CVCV speech test against the NZ English CVC standard.
+     The memorable element is the equivalence verdict band; everything else
+     stays quiet and instrument-like. Palette: deep clinical ink + slate, a
+     single spearmint accent for "within margin", clay for "outside".      */
+  :root {
+    --ink:      #16232b;   /* near-black teal, text + strong rules   */
+    --slate:    #4a5b64;   /* secondary text                         */
+    --mist:     #8fa1a8;   /* tertiary / captions                    */
+    --paper:    #f6f7f5;   /* page                                   */
+    --card:     #ffffff;
+    --line:     #dbe1e0;
+    --spearmint:#1f8a70;   /* equivalence-within accent              */
+    --clay:     #b5502f;   /* equivalence-outside / warning          */
+    --amber:    #9a6b00;   /* provisional / needs-R note             */
+    --maori:    #2a6f97;   /* Māori series                           */
+    --english:  #b5502f;   /* English series                         */
+    --radius:   10px;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.55 "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 2rem 1.25rem 5rem; }
+  h1 { font-size: 1.75rem; letter-spacing: -.01em; margin: 0 0 .2rem; }
+  h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; padding-bottom: .3rem; border-bottom: 1px solid var(--line); }
+  h3 { font-size: 1rem; margin: 1.2rem 0 .4rem; }
+  p  { margin: .5rem 0; }
+  .sub { color: var(--slate); font-size: 1rem; max-width: 68ch; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  a { color: var(--maori); }
+
+  /* Drop zone — the hero action */
+  .drop {
+    margin: 1.5rem 0; padding: 2.4rem 1.5rem; text-align: center;
+    border: 2px dashed var(--line); border-radius: var(--radius);
+    background: var(--card); transition: border-color .15s, background .15s;
+    cursor: pointer;
+  }
+  .drop.hot { border-color: var(--spearmint); background: #f0f7f4; }
+  .drop strong { font-size: 1.1rem; }
+  .drop .hint { color: var(--mist); font-size: .95rem; display: block; margin-top: .3rem; }
+  input[type=file] { display: none; }
+
+  .loaded { font-size: .95rem; color: var(--slate); margin: .5rem 0 0; }
+  .filechips { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .6rem; }
+  .chip { font-size: .8rem; background: #eef2f1; border: 1px solid var(--line);
+          border-radius: 999px; padding: .15rem .6rem; color: var(--slate); }
+  .chip.bad { background: #f7ece7; border-color: #e6cabc; color: var(--clay); }
+
+  .btnrow { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: 1rem; }
+  button.action {
+    font: inherit; font-size: .95rem; border: 1px solid var(--ink); background: var(--ink);
+    color: #fff; padding: .5rem 1rem; border-radius: 8px; cursor: pointer;
+  }
+  button.action.ghost { background: transparent; color: var(--ink); }
+  button.action:disabled { opacity: .4; cursor: default; }
+
+  /* Verdict band — the one bold element */
+  .verdict {
+    margin: 1rem 0; border-radius: var(--radius); overflow: hidden;
+    border: 1px solid var(--line);
+  }
+  .verdict .band { padding: 1rem 1.25rem; color: #fff; }
+  .verdict .band.within  { background: var(--spearmint); }
+  .verdict .band.outside { background: var(--clay); }
+  .verdict .band.unclear { background: var(--slate); }
+  .verdict .band .big { font-size: 1.35rem; font-weight: 600; }
+  .verdict .detail { padding: .8rem 1.25rem; background: var(--card); color: var(--slate); font-size: .95rem; }
+
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; margin: .5rem 0; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--line); }
+  th { color: var(--slate); font-weight: 600; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+  .stat { display: grid; grid-template-columns: 1fr auto; gap: .2rem 1rem;
+          max-width: 30rem; font-size: .95rem; }
+  .stat dt { color: var(--slate); }
+  .stat dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+  .note {
+    border-left: 3px solid var(--amber); background: #fbf6ea; color: #5a4a1e;
+    padding: .6rem .8rem; border-radius: 0 6px 6px 0; font-size: .9rem; margin: .8rem 0;
+  }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+          padding: 1rem 1.25rem; margin: 1rem 0; }
+  figure { margin: 1rem 0; }
+  figcaption { color: var(--mist); font-size: .85rem; margin-top: .3rem; }
+  svg { max-width: 100%; height: auto; background: var(--card);
+        border: 1px solid var(--line); border-radius: 8px; }
+  .empty { color: var(--mist); font-style: italic; }
+  .hidden { display: none; }
+  /* Demographics / segmentation / explorer controls */
+  .controls { display: flex; flex-wrap: wrap; gap: .8rem 1.4rem; align-items: flex-end; margin: .6rem 0; }
+  .controls label { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; color: var(--slate); }
+  .controls label.inline { flex-direction: row; align-items: center; gap: .4rem; }
+  select, input[type=text] {
+    font: inherit; font-size: .9rem; color: var(--ink); background: var(--card);
+    border: 1px solid var(--line); border-radius: 6px; padding: .3rem .45rem; min-width: 9rem; max-width: 100%;
+  }
+  input[type=text] { min-width: 7rem; width: 9rem; }
+  .pill { display: inline-block; font-size: .78rem; padding: .05rem .5rem; border-radius: 999px;
+          border: 1px solid var(--line); background: #eef2f1; color: var(--slate); white-space: nowrap; }
+  .pill.ok  { background: #e7f3ee; border-color: #bfe0d3; color: var(--spearmint); }
+  .pill.bad { background: #f7ece7; border-color: #e6cabc; color: var(--clay); }
+  .pill.warn{ background: #fbf6ea; border-color: #ead9b0; color: var(--amber); }
+  .scroll { overflow-x: auto; }
+  .scroll table { min-width: 640px; }
+  table.corr { width: auto; font-size: .78rem; }
+  table.corr th { font-weight: 600; white-space: nowrap; }
+  table.corr th.rot { height: 9.5rem; vertical-align: bottom; padding: 0 .1rem; }
+  table.corr th.rot > div { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; margin: 0 auto; }
+  table.corr td { text-align: center; padding: .25rem .3rem; min-width: 2.6rem; cursor: pointer;
+                  font-variant-numeric: tabular-nums; border: 1px solid #fff; }
+  table.corr td.diag { background: #eef1f0; cursor: default; color: var(--mist); }
+  table.corr td:hover:not(.diag) { outline: 2px solid var(--ink); outline-offset: -2px; }
+  .legend { display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .85rem; color: var(--slate); margin: .3rem 0; }
+  .legend span { display: inline-flex; align-items: center; gap: .35rem; }
+  details.card > summary { cursor: pointer; font-weight: 600; }
+  footer { margin-top: 3rem; color: var(--mist); font-size: .82rem; border-top: 1px solid var(--line); padding-top: 1rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>CVCV / CVC equivalence — analysis workbench</h1>
+  <p class="sub">Drop the per-participant JSON exports below. This runs the descriptive and
+  provisional equivalence statistics from the analysis plan so you can sanity-check the data as it
+  comes in. It is an indicator, not the final analysis — the mixed-effects model (τ_pm) and the
+  repeated-measures Bland–Altman limits are computed here only in simplified form and should be
+  confirmed in R.</p>
+
+  <label class="drop" id="drop" for="fileInput">
+    <strong>Drop participant JSON files here — and the demographics spreadsheet</strong>
+    <span class="hint">or click to choose — JSON exports plus one .xlsx / .csv of demographics; you can add more at any time</span>
+  </label>
+  <input type="file" id="fileInput" accept="application/json,.json,.xlsx,.xls,.csv" multiple>
+
+  <div id="loaded" class="loaded"></div>
+  <div id="filechips" class="filechips"></div>
+
+  <div class="btnrow">
+    <button class="action" id="runBtn" disabled>Run analysis</button>
+    <button class="action ghost" id="csvBtn" disabled>Export SRT table (CSV)</button>
+    <button class="action ghost" id="clearBtn" disabled>Clear</button>
+  </div>
+
+  <div class="card" id="demoCard">
+    <div id="demoStatus" class="loaded" style="margin:0">No demographics spreadsheet loaded — segmentation and
+      the PTA cross-check need one (columns: Participant, Age, Gender, PTA average R/L, eth_*, TRM prof).</div>
+    <div class="controls">
+      <label>Restrict every analysis to
+        <select id="filterVar"></select></label>
+      <label>= group
+        <select id="filterVal"></select></label>
+      <label>PTA used in analyses
+        <select id="ptaSource">
+          <option value="json">Audiogram in JSON (0.5–4 kHz)</option>
+          <option value="sheet">Spreadsheet PTA average</option>
+        </select></label>
+      <label>Age band cut-points (years)
+        <input type="text" id="ageCuts" value="30, 45, 60" title="Comma-separated lower bounds of each band after the first"></label>
+    </div>
+    <div class="controls" style="border-top:1px solid var(--line);padding-top:.7rem">
+      <label>Acoustic offset (Māori − English stimuli)
+        <select id="offMode">
+          <option value="none">None — raw SRTs</option>
+          <option value="band">Estimate from a te reo proficiency band</option>
+          <option value="manual">Enter a value</option>
+        </select></label>
+      <label class="offBand">TRM prof from <select id="offMin"></select></label>
+      <label class="offBand">to <select id="offMax"></select></label>
+      <label class="offManual">Offset (dB) <input type="text" id="offManual" value="0"></label>
+      <label class="inline offBand"><input type="checkbox" id="offExclude"> Leave the calibration band out of the adjusted analyses</label>
+    </div>
+  </div>
+
+  <div id="results" class="hidden">
+    <div id="filterBanner"></div>
+    <div id="offsetBox"></div>
+    <h2>Population mean agreement (Step 2)</h2>
+    <div id="verdict"></div>
+    <div id="step2"></div>
+
+    <h2>The data (Step 1)</h2>
+    <div id="plots"></div>
+    <div id="srtTable"></div>
+
+    <h2>Constant vs person-varying offset (Step 3 — provisional)</h2>
+    <div id="step3"></div>
+
+    <h2>Individual agreement — Bland–Altman (Step 4 — provisional)</h2>
+    <div id="step4"></div>
+
+    <h2>Test–retest reliability of each test (Step 6)</h2>
+    <div id="step6"></div>
+    <div id="retest"></div>
+
+    <h2>Track-length truncation, SRT(30) − SRT(20) (Step 7)</h2>
+    <div id="step7"></div>
+
+    <h2>Non-adaptive English SRT — fitted from the three list scores</h2>
+    <div class="controls">
+      <label>Slope
+        <select id="naSlope">
+          <option value="free">Free slope, fixed-slope fallback (the app's rule)</option>
+          <option value="fixed">Fixed slope 0.076 /dB (English constant)</option>
+        </select></label>
+      <label>Per-phoneme floor
+        <select id="naFloor">
+          <option value="tracks">Same as that participant's adaptive tracks</option>
+          <option value="0">0 (open-set)</option>
+        </select></label>
+    </div>
+    <div id="naOut"></div>
+
+    <h2>PTA cross-check — spreadsheet vs JSON audiograms</h2>
+    <div id="ptaCheck"></div>
+
+    <h2>Segmented analysis — age, gender, ethnicity, te reo proficiency</h2>
+    <div class="controls">
+      <label>Segment by <select id="segVar"></select></label>
+      <label>Strip plot shows
+        <select id="segMetric">
+          <option value="diff">Mean Māori − English SRT difference</option>
+          <option value="maori">Mean Māori SRT</option>
+          <option value="english">Mean English SRT</option>
+          <option value="trunc">Mean SRT(30) − SRT(20)</option>
+        </select></label>
+    </div>
+    <div id="segOut"></div>
+
+    <h2>Explore — any parameter against any other</h2>
+    <div class="controls">
+      <label>Unit of analysis
+        <select id="xLevel">
+          <option value="participant">Per participant</option>
+          <option value="ear">Per ear (participant × ear)</option>
+          <option value="pair">Per matched pair (ear × repeat)</option>
+          <option value="track">Per adaptive track</option>
+        </select></label>
+      <label>X axis <select id="xVar"></select></label>
+      <label>Y axis <select id="yVar"></select></label>
+      <label>Colour by <select id="xColour"></select></label>
+      <label class="inline"><input type="checkbox" id="xFit" checked> Fit line + 95% band</label>
+      <label class="inline"><input type="checkbox" id="xIdentity"> y = x line</label>
+    </div>
+    <div id="xPlot"></div>
+    <details class="card" id="corrBox" open>
+      <summary>Correlation matrix at this unit of analysis (Pearson r — click a cell to plot it)</summary>
+      <div id="corrOut" class="scroll"></div>
+    </details>
+  </div>
+
+  <footer>
+    Runs entirely in your browser — no data leaves this page. The spreadsheet reader (SheetJS) loads from
+    cdnjs; if it can't load, save the demographics sheet as .csv and drop that instead. SRT(20)/SRT(30) are read from each
+    track's stored per-word log where present. Provisional statistics use standard closed-form
+    methods; τ_pm and repeated-measures limits of agreement need a proper mixed model (lme4) in R.
+  </footer>
+</div>
+
+<!-- SheetJS reads the demographics .xlsx in the browser (nothing is uploaded). CSV works without it. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+/* ─────────────────────────────────────────────────────────────────────────
+   Analysis workbench. Pure client-side. No dependencies.
+   Pipeline: JSON files → per-track SRT records → paired differences → stats.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const state = {
+  files: [], records: [],
+  audio: {},        // pid → { left:{pta,masked,nFreq,source}, right:{…}, file } from the JSON audiogram
+  demo: null,       // { file, byId: pid → row, cols: [...] } from the demographics spreadsheet
+  cur: [],          // records after the global filter — what every analysis below runs on
+  na: {},           // pid → { floor, ears: { left|right: { english|maori: [{level,correct,phonemes,list}] } } }
+  naFit: {},        // pid → { left|right: { english|maori: fit } } — refitted each run
+  offset: { value: 0, mode: 'none' }   // acoustic offset applied to Māori SRTs this run
+};
+// Participant IDs are joined as text with numeric normalisation ("046", 46, "46 " → "46").
+const normId = v => { const s = String(v ?? '').trim(); return /^\d+(\.0+)?$/.test(s) ? String(parseInt(s,10)) : s.toLowerCase(); };
+
+/* ── Minimal statistics (self-contained) ──────────────────────────────── */
+const S = {
+  // Paired x/y summary for the Māori-vs-English scatter: OLS fit, correlation,
+  // Lin's concordance (agreement with y = x) and a Deming slope.
+  regress: pts => {
+    const n=pts.length; if (n<3) return null;
+    const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y), mx=S.mean(xs), my=S.mean(ys);
+    let sxx=0, syy=0, sxy=0;
+    pts.forEach(p=>{ const dx=p.x-mx, dy=p.y-my; sxx+=dx*dx; syy+=dy*dy; sxy+=dx*dy; });
+    if (sxx===0 || syy===0) return null;
+    const slope=sxy/sxx, intercept=my-slope*mx, df=n-2;
+    const r=sxy/Math.sqrt(sxx*syy);
+    const rss=pts.reduce((s,p)=>s+(p.y-(intercept+slope*p.x))**2,0), sres=Math.sqrt(rss/df);
+    const seSlope=sres/Math.sqrt(sxx), seInt=sres*Math.sqrt(1/n+mx*mx/sxx);
+    const t=S.tinv(0.975, df);
+    const tr=r*Math.sqrt(df/Math.max(1e-12,1-r*r)), pR=2*(1-S.tcdf(Math.abs(tr),df));
+    let rCI=null; if (n>=4){ const z=Math.atanh(Math.min(r,0.999999)), se=1/Math.sqrt(n-3);
+      rCI=[Math.tanh(z-1.96*se), Math.tanh(z+1.96*se)]; }
+    // Spearman: Pearson on (tie-averaged) ranks
+    const rank=a=>{ const o=a.map((v,i)=>[v,i]).sort((p,q)=>p[0]-q[0]), rk=new Array(a.length);
+      for(let i=0;i<o.length;){ let j=i; while(j+1<o.length&&o[j+1][0]===o[i][0]) j++;
+        for(let k=i;k<=j;k++) rk[o[k][1]]=(i+j)/2+1; i=j+1; } return rk; };
+    const rx=rank(xs), ry=rank(ys), mrx=S.mean(rx), mry=S.mean(ry);
+    let a=0,b=0,c=0; rx.forEach((v,i)=>{ a+=(v-mrx)*(ry[i]-mry); b+=(v-mrx)**2; c+=(ry[i]-mry)**2; });
+    const rho=(b&&c)?a/Math.sqrt(b*c):NaN;
+    // Lin's CCC (population moments, as in Lin 1989)
+    const ccc=2*(sxy/n)/((sxx/n)+(syy/n)+(mx-my)**2);
+    // Deming, equal error variances (orthogonal regression)
+    const dSlope=(syy-sxx+Math.sqrt((syy-sxx)**2+4*sxy*sxy))/(2*sxy), dInt=my-dSlope*mx;
+    // 95% confidence band for the fitted mean
+    const band=x0=>{ const h=t*sres*Math.sqrt(1/n+(x0-mx)**2/sxx), yh=intercept+slope*x0; return [yh-h, yh+h]; };
+    return { n, slope, intercept, seSlope, seInt, t, r, r2:r*r, pR, rCI, rho, ccc, sres,
+             dSlope, dInt, band, xmin:Math.min(...xs), xmax:Math.max(...xs) };
+  },
+  mean: a => a.length ? a.reduce((s,x)=>s+x,0)/a.length : NaN,
+  sd: a => { if (a.length<2) return NaN; const m=S.mean(a);
+             return Math.sqrt(a.reduce((s,x)=>s+(x-m)**2,0)/(a.length-1)); },
+  // Student-t inverse CDF via Cornish–Fisher / Newton on the incomplete beta.
+  // Good to ~3 dp for df≥2, which is ample for a descriptive CI.
+  tinv: (p, df) => {
+    // two-sided helper uses p as the upper-tail area for +t.
+    if (df <= 0) return NaN;
+    // Newton iteration on CDF.
+    let x = 0, // start at 0
+        lo = -100, hi = 100;
+    const target = p;
+    for (let i=0;i<200;i++){
+      const c = S.tcdf(x, df);
+      if (Math.abs(c-target) < 1e-9) break;
+      if (c < target) lo = x; else hi = x;
+      x = (lo+hi)/2;
+    }
+    return x;
+  },
+  // Student-t CDF via regularised incomplete beta.
+  tcdf: (t, df) => {
+    const x = df/(df+t*t);
+    const ib = S.betai(df/2, 0.5, x);
+    return t>0 ? 1 - 0.5*ib : 0.5*ib;
+  },
+  // Regularised incomplete beta I_x(a,b) (Numerical Recipes style).
+  betai: (a,b,x) => {
+    if (x<=0) return 0; if (x>=1) return 1;
+    const bt = Math.exp(S.gammaln(a+b)-S.gammaln(a)-S.gammaln(b)+a*Math.log(x)+b*Math.log(1-x));
+    if (x < (a+1)/(a+b+2)) return bt*S.betacf(a,b,x)/a;
+    return 1 - bt*S.betacf(b,a,1-x)/b;
+  },
+  betacf: (a,b,x) => {
+    const MAXIT=200, EPS=3e-12, FPMIN=1e-300;
+    let qab=a+b, qap=a+1, qam=a-1, c=1, d=1-qab*x/qap;
+    if (Math.abs(d)<FPMIN) d=FPMIN; d=1/d; let h=d;
+    for (let m=1;m<=MAXIT;m++){
+      const m2=2*m;
+      let aa=m*(b-m)*x/((qam+m2)*(a+m2));
+      d=1+aa*d; if (Math.abs(d)<FPMIN) d=FPMIN;
+      c=1+aa/c; if (Math.abs(c)<FPMIN) c=FPMIN;
+      d=1/d; h*=d*c;
+      aa=-(a+m)*(qab+m)*x/((a+m2)*(qap+m2));
+      d=1+aa*d; if (Math.abs(d)<FPMIN) d=FPMIN;
+      c=1+aa/c; if (Math.abs(c)<FPMIN) c=FPMIN;
+      d=1/d; const del=d*c; h*=del;
+      if (Math.abs(del-1)<EPS) break;
+    }
+    return h;
+  },
+  // Welch two-sample t-test (unequal variances).
+  welch: (a, b) => {
+    if (a.length < 2 || b.length < 2) return null;
+    const va = S.sd(a)**2/a.length, vb = S.sd(b)**2/b.length;
+    if (va + vb === 0) return null;
+    const t = (S.mean(a) - S.mean(b)) / Math.sqrt(va + vb);
+    const df = (va+vb)**2 / (va*va/(a.length-1) + vb*vb/(b.length-1));
+    return { t, df, p: 2*(1 - S.tcdf(Math.abs(t), df)), diff: S.mean(a) - S.mean(b) };
+  },
+  // One-way ANOVA across k groups (F test).
+  anova: groups => {
+    const g = groups.filter(x => x.length >= 1), all = g.flat(), k = g.length, N = all.length;
+    if (k < 2 || N - k < 1) return null;
+    const gm = S.mean(all);
+    const ssb = g.reduce((s,x) => s + x.length*(S.mean(x)-gm)**2, 0);
+    const ssw = g.reduce((s,x) => { const m=S.mean(x); return s + x.reduce((q,v)=>q+(v-m)**2,0); }, 0);
+    const df1 = k-1, df2 = N-k; if (ssw === 0) return null;
+    const F = (ssb/df1)/(ssw/df2);
+    return { F, df1, df2, p: S.betai(df2/2, df1/2, df2/(df2+df1*F)), eta2: ssb/(ssb+ssw) };
+  },
+  // Pairwise-complete Pearson r with n and two-sided p.
+  corr: (xs, ys) => {
+    const pts = []; xs.forEach((x,i) => { const y = ys[i]; if (Number.isFinite(x) && Number.isFinite(y)) pts.push([x,y]); });
+    const n = pts.length; if (n < 3) return { r: NaN, n, p: NaN };
+    const mx = S.mean(pts.map(p=>p[0])), my = S.mean(pts.map(p=>p[1]));
+    let sxx=0, syy=0, sxy=0; pts.forEach(([x,y]) => { sxx+=(x-mx)**2; syy+=(y-my)**2; sxy+=(x-mx)*(y-my); });
+    if (!sxx || !syy) return { r: NaN, n, p: NaN };
+    const r = sxy/Math.sqrt(sxx*syy), df = n-2, t = r*Math.sqrt(df/Math.max(1e-12, 1-r*r));
+    return { r, n, p: 2*(1 - S.tcdf(Math.abs(t), df)) };
+  },
+  gammaln: x => {
+    const g=[76.18009172947146,-86.50532032941677,24.01409824083091,
+      -1.231739572450155,0.1208650973866179e-2,-0.5395239384953e-5];
+    let y=x, tmp=x+5.5; tmp-=(x+0.5)*Math.log(tmp); let ser=1.000000000190015;
+    for (let j=0;j<6;j++){ y++; ser+=g[j]/y; }
+    return -tmp+Math.log(2.5066282746310005*ser/x);
+  }
+};
+
+/* ── Psychometric fit — a faithful port of adaptive.js (fitFromLog) ─────────
+   Per-phoneme Bernoulli MLE on the Brand & Kollmeier logistic (open-set, floor 0),
+   minimised over [SRT, log slope] by multi-start Nelder–Mead. If the free fit is
+   degenerate (SRT outside the tested range ± pad, or slope < 0.01) the SRT is re-fit
+   with the slope held at the app's language constant; last resort is the
+   reversal-mean. Keep in step with adaptive.js if that changes.               */
+const FIT = (() => {
+  const FIXED_SLOPE = { maori: 0.073, english: 0.076, default: 0.075 };
+  const slopeFor = l => FIXED_SLOPE[String(l || '').toLowerCase()] ?? FIXED_SLOPE.default;
+  const A = 1e6;
+  const cleanRaw = (L, srt, slope) => { const denom = (A - 1) / (4 * A * slope);
+    return (1 / A) * (1 + ((A - 1) / (1 + Math.exp(-(L - srt) / denom)))); };
+  const clean = (L, srt, slope, floor = 0) => floor + (1 - floor) * cleanRaw(L, srt, slope);
+  function nelderMead(f, start, step, opt) {
+    const alpha = 1, gamma = 2, rho = 0.5, sigma = 0.5, maxIt = opt.maxIterations || 400, tol = opt.tolerance || 1e-7;
+    let s = [{ x: [start[0], start[1]], fx: f([start[0], start[1]]) },
+             { x: [start[0] + step[0], start[1]], fx: f([start[0] + step[0], start[1]]) },
+             { x: [start[0], start[1] + step[1]], fx: f([start[0], start[1] + step[1]]) }];
+    for (let it = 0; it < maxIt; it++) {
+      s.sort((a, b) => a.fx - b.fx);
+      const [b, se, w] = s;
+      const spread = Math.max(Math.abs(b.fx - se.fx), Math.abs(b.fx - w.fx));
+      const size = Math.max(Math.hypot(b.x[0] - se.x[0], b.x[1] - se.x[1]), Math.hypot(b.x[0] - w.x[0], b.x[1] - w.x[1]));
+      if (spread < tol && size < tol) return { x: b.x, fx: b.fx, converged: true };
+      const c = [(b.x[0] + se.x[0]) / 2, (b.x[1] + se.x[1]) / 2];
+      const rx = [c[0] + alpha * (c[0] - w.x[0]), c[1] + alpha * (c[1] - w.x[1])], r = { x: rx, fx: f(rx) };
+      if (r.fx < b.fx) { const ex = [c[0] + gamma * (r.x[0] - c[0]), c[1] + gamma * (r.x[1] - c[1])], e = { x: ex, fx: f(ex) };
+        s[2] = e.fx < r.fx ? e : r; continue; }
+      if (r.fx < se.fx) { s[2] = r; continue; }
+      const cx = r.fx < w.fx ? [c[0] + rho * (r.x[0] - c[0]), c[1] + rho * (r.x[1] - c[1])]
+                             : [c[0] - rho * (c[0] - w.x[0]), c[1] - rho * (c[1] - w.x[1])];
+      const ct = { x: cx, fx: f(cx) };
+      if (ct.fx < w.fx) { s[2] = ct; continue; }
+      s[1] = { x: [b.x[0] + sigma * (s[1].x[0] - b.x[0]), b.x[1] + sigma * (s[1].x[1] - b.x[1])] }; s[1].fx = f(s[1].x);
+      s[2] = { x: [b.x[0] + sigma * (s[2].x[0] - b.x[0]), b.x[1] + sigma * (s[2].x[1] - b.x[1])] }; s[2].fx = f(s[2].x);
+    }
+    s.sort((a, b) => a.fx - b.fx); return { x: s[0].x, fx: s[0].fx, converged: false };
+  }
+  function robust(log) {
+    const rev = (log || []).filter(e => e && e.reversal && isFinite(Number(e.level))).map(e => Number(e.level));
+    const pick = rev.length >= 4 ? rev : (log || []).slice(Math.floor((log || []).length / 2)).map(e => Number(e.level)).filter(isFinite);
+    return pick.length ? pick.reduce((a, b) => a + b, 0) / pick.length : null;
+  }
+  // entries: [{level, correct, phonemes}] ; opts: {language, forceFixed, floor}
+  function fit(entries, opts = {}) {
+    const xs = [], ys = []; let ph0 = null;
+    for (const e of entries || []) { const L = Number(e.level), ph = Number(e.phonemes) || 0, c = Number(e.correct) || 0;
+      if (!isFinite(L) || ph <= 0) continue; if (ph0 == null) ph0 = ph;
+      for (let i = 0; i < ph; i++) { xs.push(L); ys.push(i < c ? 1 : 0); } }
+    if (xs.length < 4) return null;
+    const language = opts.language || (ph0 === 3 ? 'english' : 'maori'), floor = Number.isFinite(opts.floor) ? opts.floor : 0;
+    const nll = p => { const srt = p[0], slope = Math.exp(p[1]);
+      if (!isFinite(srt) || !isFinite(slope) || slope <= 0 || slope > 10) return Infinity;
+      let s = 0; for (let i = 0; i < xs.length; i++) { const q = Math.min(1 - 1e-12, Math.max(1e-12, clean(xs[i], srt, slope, floor)));
+        s -= ys[i] * Math.log(q) + (1 - ys[i]) * Math.log(1 - q); } return s; };
+    const sorted = xs.slice().sort((a, b) => a - b), lo = sorted[0], hi = sorted[sorted.length - 1];
+    const med = sorted[Math.floor(sorted.length / 2)];
+    const starts = [isFinite(med) ? med : 0, lo + (hi - lo) * .25, lo + (hi - lo) * .5, lo + (hi - lo) * .75];
+    const pad = Math.max(3, 0.15 * (hi - lo)), inRange = v => isFinite(v) && v >= lo - pad && v <= hi + pad;
+    const fixedFit = () => { const fx = slopeFor(language), f1 = p => nll([p[0], Math.log(fx)]); let bF = null;
+      for (const s0 of starts) { const r = nelderMead(f1, [s0], [2.0], { maxIterations: 400, tolerance: 1e-9 });
+        if (r && isFinite(r.fx) && (!bF || r.fx < bF.fx)) bF = r; } return bF; };
+    if (opts.forceFixed) { const bF = fixedFit();
+      return bF ? { srt: bF.x[0], slope: slopeFor(language), method: 'fixed-slope (forced)', degenerate: false, n: xs.length, inRange: inRange(bF.x[0]) } : null; }
+    let best = null;
+    for (const s0 of starts) for (const sl0 of [0.05, 0.1, 0.3]) {
+      const r = nelderMead(nll, [s0, Math.log(sl0)], [2.0, 0.5], { maxIterations: 600, tolerance: 1e-9 });
+      if (r && isFinite(r.fx) && (!best || r.fx < best.fx)) best = r; }
+    if (!best) return null;
+    let srt = best.x[0], slope = Math.exp(best.x[1]), method = 'free-slope', degenerate = false;
+    if (!inRange(srt) || slope < 0.01) {
+      degenerate = true; const bF = fixedFit();
+      if (bF && inRange(bF.x[0])) { srt = bF.x[0]; slope = slopeFor(language); method = 'fixed-slope'; }
+      else { const rb = robust(entries); if (rb != null) { srt = rb; slope = null; method = 'reversal-mean'; } }
+    }
+    return { srt, slope, method, degenerate, n: xs.length };
+  }
+  return { fit, slopeFor, clean };
+})();
+
+/* ── Ingest ────────────────────────────────────────────────────────────── */
+
+// ── Track reliability helpers (mirrors the app's report) ──────────────────
+// Reversals = staircase direction changes; SE = SD of settled levels ÷ √n.
+function trackReversals(log) {
+  if (!Array.isArray(log) || log.length < 3) return null;
+  const levels = log.map(e => Number(e.level)).filter(Number.isFinite);
+  let rev = 0, prev = 0;
+  for (let i = 1; i < levels.length; i++) {
+    const dd = levels[i] - levels[i-1];
+    const s = dd > 1e-9 ? 1 : (dd < -1e-9 ? -1 : 0);
+    if (s !== 0) { if (prev !== 0 && s !== prev) rev++; prev = s; }
+  }
+  return rev;
+}
+function trackSrtSE(log) {
+  if (!Array.isArray(log)) return null;
+  const levels = log.map(e => Number(e.level)).filter(Number.isFinite);
+  const drop = Math.min(15, Math.floor(levels.length / 2));
+  const settled = levels.slice(drop);
+  if (settled.length < 3) return null;
+  const m = settled.reduce((s,x)=>s+x,0)/settled.length;
+  const sd = Math.sqrt(settled.reduce((s,x)=>s+(x-m)**2,0)/settled.length);
+  return +(sd/Math.sqrt(settled.length)).toFixed(2);
+}
+
+function tracksFromPayload(d, fileName) {
+  const out = [];
+  const pid = normId((d.experiment && d.experiment.participant != null)
+    ? String(d.experiment.participant)
+    : (d.client && d.client.name) ? d.client.name : fileName.replace(/\.json$/i,''));
+  const ptaDetail = readPTA(d, true);
+  const ptaByEar = { left: ptaDetail.left.pta, right: ptaDetail.right.pta };
+  state.audio[pid] = { ...ptaDetail, file: fileName };
+  state.na[pid] = naFromPayload(d);
+  const tracks = Array.isArray(d.adaptiveTracks) ? d.adaptiveTracks : [];
+  // Assign repeat index per (language, ear) in timestamp order.
+  const sorted = tracks.slice().sort((a,b)=>String(a.timestamp).localeCompare(String(b.timestamp)));
+  const seen = {};
+  sorted.forEach(t => {
+    const ear = (t.stimulusEar || t.condition || '').toLowerCase();
+    const lang = (t.language || 'maori').toLowerCase();
+    if (ear !== 'left' && ear !== 'right') return;        // skip binaural for the paired analysis
+    // SRT@30 is the app's stored fit; SRT@20 is refitted from the first 20 words with the SAME
+    // MLE and the same per-unit floor the track was fitted with (port of adaptive.js), so the
+    // 30-vs-20 comparison isn't contaminated by an estimator or floor difference.
+    const floor = Number.isFinite(Number(t.perUnitFloor)) ? Number(t.perUnitFloor) : 0;
+    const f30 = Array.isArray(t.log) ? FIT.fit(t.log.slice(0, 30), { language: lang, floor }) : null;
+    const f20 = Array.isArray(t.log) && t.log.length >= 20 ? FIT.fit(t.log.slice(0, 20), { language: lang, floor }) : null;
+    const srt30 = Number.isFinite(Number(t.srt)) && t.srt !== null ? Number(t.srt) : (f30 ? f30.srt : null);
+    const srt20 = f20 ? f20.srt : null;
+    const key = lang+'|'+ear; seen[key]=(seen[key]||0)+1;
+    out.push({
+      participant: pid, language: lang, ear, repeat: seen[key],
+      lists: Array.isArray(t.listNumbers)?t.listNumbers.join('+'):'',
+      srt20: srt20==null?null:+srt20.toFixed(2),
+      srt30: srt30==null?null:+srt30.toFixed(2),
+      srt20raw: srt20==null?null:+srt20.toFixed(2),   // before any acoustic-offset adjustment
+      srt30raw: srt30==null?null:+srt30.toFixed(2),
+      floor,
+      reversals: trackReversals(t.log),
+      seSrt: trackSrtSE(t.log),
+      method: t.srtMethod || (t.srtDegenerate ? 'fixed-slope' : 'free-slope'),
+      slope: Number.isFinite(Number(t.slope)) && t.slope !== null ? Number(t.slope) : null,
+      startLevel: Number.isFinite(Number(t.startLevel)) && t.startLevel !== null ? Number(t.startLevel) : null,
+      ptaJson: ptaByEar[ear] ?? null,
+      pta: ptaByEar[ear] ?? null,      // overwritten at run time by the chosen PTA source
+      converged: !!t.fitConverged, file: fileName
+    });
+  });
+  return out;
+}
+
+function readPTA(d, detailed=false) {
+  // Prefer the saved audiogram (state.participant). Fall back to null.
+  // Guard against Number(null)===0: a not-entered PTA must stay null, not become
+  // a spurious 0 dB point. A genuinely measured 0 (normal hearing) is kept.
+  // Per frequency, a masked AC threshold (the true threshold) beats an unmasked one.
+  const num = (v) => (v === null || v === undefined || v === "") ? null
+                   : (Number.isFinite(Number(v)) ? Number(v) : null);
+  const blank = () => ({ pta: null, masked: 0, nFreq: 0, source: null });
+  const det = { left: blank(), right: blank() };
+  const p = d.participant;
+  if (p) ['left','right'].forEach(ear => {
+    const e = p[ear]; if (!e) return;
+    let v = num(e.pta);    if (v !== null) { det[ear] = { pta: v, masked: 0, nFreq: 4, source: 'pta field' }; return; }
+    v = num(e.fourfa);     if (v !== null) { det[ear] = { pta: v, masked: 0, nFreq: 4, source: '4FA field' }; return; }
+    // derive a 0.5–1–2–4 kHz average from the AC audiogram
+    const a = e.audiogram || {}, acU = a.acUnmasked || {}, acM = a.acMasked || {};
+    let masked = 0;
+    const f = [500,1000,2000,4000].map(k => {
+      const m = num(acM[k]); if (m !== null) { masked++; return m; }
+      return num(acU[k]);
+    }).filter(x => x !== null);
+    if (f.length) det[ear] = { pta: +(f.reduce((s,x)=>s+x,0)/f.length).toFixed(2), masked,
+                               nFreq: f.length, source: 'audiogram' };
+    // keep the raw thresholds so the cross-check can test other averaging rules
+    const merged = {}; new Set([...Object.keys(acU), ...Object.keys(acM)]).forEach(k => {
+      const m = num(acM[k]), u = num(acU[k]); if (m !== null || u !== null) merged[k] = m !== null ? m : u; });
+    det[ear].ac = merged;
+    det[ear].acU = Object.fromEntries(Object.entries(acU).map(([k,v]) => [k, num(v)]).filter(([,v]) => v !== null));
+  });
+  return detailed ? det : { left: det.left.pta, right: det.right.pta };
+}
+
+/* ── File handling ─────────────────────────────────────────────────────── */
+const drop = document.getElementById('drop');
+const fileInput = document.getElementById('fileInput');
+['dragenter','dragover'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('hot'); }));
+['dragleave','drop'].forEach(ev =>
+  drop.addEventListener(ev, e => { e.preventDefault(); if (ev==='drop') handleFiles(e.dataTransfer.files); drop.classList.remove('hot'); }));
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+function handleFiles(fileList) {
+  const all = Array.from(fileList);
+  all.filter(f => /\.(xlsx|xls|csv)$/i.test(f.name)).forEach(loadDemographics);
+  const files = all.filter(f => /\.json$/i.test(f.name));
+  let pending = files.length;
+  if (!pending) return;
+  files.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = ev => {
+      let ok = true, tracks = [];
+      try {
+        const d = JSON.parse(ev.target.result);
+        tracks = tracksFromPayload(d, file.name);
+        if (!tracks.length) ok = false;
+      } catch { ok = false; }
+      state.files.push({ name: file.name, ok, nTracks: tracks.length });
+      state.records.push(...tracks);
+      if (--pending === 0) renderLoaded();
+    };
+    reader.readAsText(file);
+  });
+}
+
+function renderLoaded() {
+  const nP = new Set(state.records.map(r=>r.participant)).size;
+  document.getElementById('loaded').textContent =
+    `${state.files.length} file(s) loaded · ${nP} participant(s) · ${state.records.length} adaptive track(s).`;
+  document.getElementById('filechips').innerHTML = state.files.map(f =>
+    `<span class="chip ${f.ok?'':'bad'}">${f.name}${f.ok?` · ${f.nTracks} tracks`:' · no tracks'}</span>`).join('');
+  const has = state.records.length > 0;
+  document.getElementById('runBtn').disabled = !has;
+  document.getElementById('csvBtn').disabled = !has;
+  document.getElementById('clearBtn').disabled = state.files.length === 0 && !state.demo;
+  renderDemoStatus();
+  populateSegmentSelects();
+}
+
+document.getElementById('clearBtn').onclick = () => {
+  state.files = []; state.records = []; state.audio = {}; state.demo = null; state.cur = []; state.na = {}; state.naFit = {};
+  renderDemoStatus(); populateSegmentSelects();
+  renderLoaded();
+  document.getElementById('results').classList.add('hidden');
+  document.getElementById('loaded').textContent = '';
+  document.getElementById('filechips').innerHTML = '';
+};
+
+/* ── Paired differences (the analysis atom) ────────────────────────────── */
+function pairs(records = state.cur) {
+  // Match Māori & English at the same participant + ear + repeat.
+  const idx = {};
+  records.forEach(r => {
+    if (r.srt30 == null) return;
+    idx[[r.participant,r.ear,r.repeat,r.language].join('|')] = r;
+  });
+  const out = [];
+  records.forEach(m => {
+    if (m.language !== 'maori' || m.srt30 == null) return;
+    const e = idx[[m.participant,m.ear,m.repeat,'english'].join('|')];
+    if (e) out.push({
+      participant: m.participant, ear: m.ear, repeat: m.repeat,
+      maori: m.srt30, english: e.srt30, diff: +(m.srt30 - e.srt30).toFixed(2),
+      maori20: m.srt20, english20: e.srt20,
+      pta: m.pta ?? e.pta ?? null
+    });
+  });
+  return out;
+}
+
+/* ── Run ───────────────────────────────────────────────────────────────── */
+document.getElementById('runBtn').onclick = run;
+function run(scroll = true) {
+  applyPtaSource();
+  fitNonAdaptive();
+  state.offset = computeOffset();
+  applyOffset(state.offset.value);
+  state.cur = filteredRecords();
+  if (state.offset.excludePids) state.cur = state.cur.filter(r => !state.offset.excludePids.has(r.participant));
+  renderFilterBanner();
+  renderOffsetBox();
+  const P = pairs();
+  // When a restriction is active, excluded participants are drawn as faint grey ghosts on fixed
+  // full-data axes, so the restricted plot is visibly a subset rather than a rescaled look-alike.
+  const curPids = new Set(state.cur.map(r => r.participant));
+  ghostP = state.cur.length === state.records.length ? [] : pairs(state.records).filter(p => !curPids.has(p.participant));
+  document.getElementById('results').classList.remove('hidden');
+  step2(P);
+  step1plots(P);
+  srtTable();
+  step3(P);
+  step4(P);
+  step6();
+  retest();
+  step7();
+  naSection();
+  ptaCheck();
+  segmented();
+  explorer();
+  if (scroll) document.getElementById('results').scrollIntoView({behavior:'smooth', block:'start'});
+}
+let ghostP = [];
+const rerun = () => { if (!document.getElementById('results').classList.contains('hidden')) run(false); };
+
+function fmt(v, d=1){ return (v==null||!Number.isFinite(v))?'—':v.toFixed(d); }
+
+/* Step 2 — mean agreement + TOST at ±5 (and ±3, ±7.5) */
+function step2(P) {
+  const v = document.getElementById('verdict');
+  const box = document.getElementById('step2');
+  const D = P.map(p=>p.diff);
+  if (D.length < 2) {
+    v.innerHTML = `<div class="verdict"><div class="band unclear"><span class="big">Not enough paired data yet</span></div>
+      <div class="detail">Need at least two matched Māori/English pairs (same ear &amp; repeat). Loaded: ${D.length}.</div></div>`;
+    box.innerHTML = ''; return;
+  }
+  const n=D.length, m=S.mean(D), sd=S.sd(D), se=sd/Math.sqrt(n), df=n-1;
+  const t90 = S.tinv(0.95, df);         // 90% CI (two one-sided at 5%) → for TOST
+  const t95 = S.tinv(0.975, df);        // 95% CI for reporting
+  const ci90 = [m - t90*se, m + t90*se];
+  const ci95 = [m - t95*se, m + t95*se];
+  const margins = [5,3,7.5];
+  const tostRows = margins.map(delta => {
+    const within = ci90[0] > -delta && ci90[1] < delta;   // 90% CI inside ±δ
+    return { delta, within, ci90 };
+  });
+  const primary = tostRows.find(r=>r.delta===5);
+  const band = primary.within ? 'within' : (Math.abs(m) > 5 ? 'outside' : 'unclear');
+  const verdictText = primary.within
+    ? 'Equivalent at ±5 dB (provisional)'
+    : (band==='outside' ? 'Not equivalent at ±5 dB (mean beyond margin)' : 'Equivalence not established at ±5 dB');
+  v.innerHTML = `
+    <div class="verdict"><div class="band ${band}">
+      <span class="big">${verdictText}</span>
+    </div>
+    <div class="detail">Mean Māori−English difference ${fmt(m)} dB (90% CI ${fmt(ci90[0])} to ${fmt(ci90[1])} dB),
+      over ${n} matched pair(s). ${offsetActive() ? `Māori SRTs adjusted by ${fmt(-state.offset.value,2)} dB for the acoustic offset (see above). ` : ''}TOST concludes equivalence only if the 90% CI lies entirely inside the margin.</div></div>`;
+  box.innerHTML = `
+    <dl class="stat">
+      <dt>Mean difference (Māori − English)</dt><dd>${fmt(m)} dB</dd>
+      <dt>SD of differences</dt><dd>${fmt(sd)} dB</dd>
+      <dt>95% CI for the mean</dt><dd>${fmt(ci95[0])} to ${fmt(ci95[1])} dB</dd>
+      <dt>Pairs (n)</dt><dd>${n}</dd>
+    </dl>
+    <table><thead><tr><th>Margin</th><th>90% CI</th><th>Equivalent?</th></tr></thead><tbody>
+      ${tostRows.map(r=>`<tr><td>±${r.delta} dB</td><td class="num">${fmt(r.ci90[0])} to ${fmt(r.ci90[1])}</td>
+        <td>${r.within?'<b style="color:var(--spearmint)">yes</b>':'no'}</td></tr>`).join('')}
+    </tbody></table>
+    <div class="note">TOST here treats the pairs as independent, which they are not (repeats and two
+    ears cluster within participant). The verdict is a provisional indicator; the confirmatory test
+    uses a mixed model in R that respects that clustering.</div>`;
+}
+
+/* Step 1 — scatter plots */
+function step1plots(P) {
+  const host = document.getElementById('plots');
+  if (P.length < 1) { host.innerHTML = '<p class="empty">No paired data to plot.</p>'; return; }
+  const xy = P.map(p=>({x:p.english, y:p.maori}));
+  const fit = S.regress(xy);
+  const s1 = scatter(xy, 'English SRT dB(A)', offsetActive() ? 'Māori SRT dB(A), offset-adjusted' : 'Māori SRT dB(A)', true, fit, ghostP.map(p=>({x:p.english, y:p.maori})));
+  const sgn = v => v<0 ? '−' : '+';
+  const pTxt = p => p<0.001 ? '&lt; 0.001' : '= '+p.toFixed(3);
+  const fitBox = fit ? `
+    <dl class="stat">
+      <dt>OLS fit</dt><dd class="mono">y = ${fit.slope.toFixed(2)}x ${sgn(fit.intercept)} ${Math.abs(fit.intercept).toFixed(1)}</dd>
+      <dt>Slope (95% CI)</dt><dd>${fmt(fit.slope,2)} (${fmt(fit.slope-fit.t*fit.seSlope,2)} to ${fmt(fit.slope+fit.t*fit.seSlope,2)})</dd>
+      <dt>Intercept (95% CI)</dt><dd>${fmt(fit.intercept)} (${fmt(fit.intercept-fit.t*fit.seInt)} to ${fmt(fit.intercept+fit.t*fit.seInt)}) dB</dd>
+      <dt>Pearson r${fit.rCI?' (95% CI)':''}</dt><dd>${fmt(fit.r,3)}${fit.rCI?` (${fmt(fit.rCI[0],2)} to ${fmt(fit.rCI[1],2)})`:''}, p ${pTxt(fit.pR)}</dd>
+      <dt>R²</dt><dd>${fmt(fit.r2,3)}</dd>
+      <dt>Spearman ρ</dt><dd>${fmt(fit.rho,3)}</dd>
+      <dt>Lin's concordance ρ<sub>c</sub></dt><dd>${fmt(fit.ccc,3)}</dd>
+      <dt>Residual SD about the line</dt><dd>${fmt(fit.sres)} dB</dd>
+      <dt>Deming fit (equal error variances)</dt><dd class="mono">y = ${fit.dSlope.toFixed(2)}x ${sgn(fit.dInt)} ${Math.abs(fit.dInt).toFixed(1)}</dd>
+      <dt>Pairs (n)</dt><dd>${fit.n}</dd>
+    </dl>
+    <div class="note">Correlation (r, ρ) shows the two tests <em>rank</em> people alike; it doesn't show they
+    <em>agree</em> — a constant 10 dB offset still gives r = 1. Lin's ρ<sub>c</sub> is the agreement measure: it
+    is r penalised for any departure from the y = x line (1 = perfect agreement). The OLS slope is pulled below 1
+    by measurement error in the English SRTs (regression dilution), so the Deming slope, which allows error on
+    both axes, is the fairer test of "slope = 1". As elsewhere on this page, ears and repeats are treated as
+    independent, so the CIs and p-value are optimistic.</div>` : '';
+  const withPta = P.filter(p=>p.pta!=null);
+  const s2 = withPta.length
+    ? scatter(withPta.map(p=>({x:p.pta, y:p.diff})), 'PTA dB HL', 'Māori−English diff dB', false, null, ghostP.filter(p=>p.pta!=null).map(p=>({x:p.pta, y:p.diff})))
+    : `<p class="empty">No PTA saved in these files — enter the audiogram in the app so PTA travels with the export.</p>`;
+  host.innerHTML =
+    `<figure>${s1}<figcaption>${offsetNote()}${ghostNote(P.length)}Each point is one ear × repeat. Dashed grey: equality (y = x). Solid: least-squares
+       fit with its shaded 95% confidence band${fit?'':' (needs ≥3 pairs with spread on both axes)'}.</figcaption></figure>${fitBox}
+     <figure>${s2}<figcaption>${offsetNote()}${ghostNote(withPta.length)}Method difference against hearing level. A slope here would mean a single correction isn't safe across severity (Step 5).</figcaption></figure>`;
+}
+
+let clipSeq = 0;
+function ghostNote(n) {
+  return ghostP.length ? `<b>Restricted: ${n} point(s) shown in blue; ${ghostP.length} excluded pair(s) as grey rings for context.</b> ` : '';
+}
+function scatter(pts, xlab, ylab, identity, fit=null, ghost=[]) {
+  const W=640,H=360,m={l:56,r:16,t:16,b:44};
+  const xs=pts.concat(ghost).map(p=>p.x), ys=pts.concat(ghost).map(p=>p.y);
+  const all = identity ? xs.concat(ys) : xs;
+  let xmin=Math.min(...all), xmax=Math.max(...all), ymin=Math.min(...ys), ymax=Math.max(...ys);
+  if (identity){ xmin=ymin=Math.min(xmin,ymin); xmax=ymax=Math.max(xmax,ymax); }
+  const padx=(xmax-xmin||10)*0.1, pady=(ymax-ymin||10)*0.1;
+  xmin-=padx; xmax+=padx; ymin-=pady; ymax+=pady;
+  const X=v=>m.l+(v-xmin)/(xmax-xmin)*(W-m.l-m.r);
+  const Y=v=>H-m.b-(v-ymin)/(ymax-ymin)*(H-m.t-m.b);
+  const ticks=(a,b)=>{const step=niceStep((b-a)/5); const t=[]; for(let v=Math.ceil(a/step)*step; v<=b; v+=step) t.push(+v.toFixed(2)); return t;};
+  const gx=ticks(xmin,xmax), gy=ticks(ymin,ymax);
+  let g='';
+  gx.forEach(v=>{ g+=`<line x1="${X(v)}" y1="${m.t}" x2="${X(v)}" y2="${H-m.b}" stroke="#eef1f0"/>
+    <text x="${X(v)}" y="${H-m.b+16}" font-size="11" fill="#8fa1a8" text-anchor="middle">${v}</text>`; });
+  gy.forEach(v=>{ g+=`<line x1="${m.l}" y1="${Y(v)}" x2="${W-m.r}" y2="${Y(v)}" stroke="#eef1f0"/>
+    <text x="${m.l-8}" y="${Y(v)+4}" font-size="11" fill="#8fa1a8" text-anchor="end">${v}</text>`; });
+  let extra='';
+  if (identity){ const lo=Math.max(xmin,ymin),hi=Math.min(xmax,ymax);
+    extra=`<line x1="${X(lo)}" y1="${Y(lo)}" x2="${X(hi)}" y2="${Y(hi)}" stroke="#8fa1a8" stroke-dasharray="4 4"/>`; }
+  else { extra=`<line x1="${m.l}" y1="${Y(0)}" x2="${W-m.r}" y2="${Y(0)}" stroke="#8fa1a8" stroke-dasharray="4 4"/>`; }
+  let fitSvg='', legend='', clip='';
+  if (fit) {
+    const id='plotclip'+(++clipSeq);
+    clip=`<defs><clipPath id="${id}"><rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}"/></clipPath></defs>`;
+    const N=40, xa=[]; for(let i=0;i<=N;i++) xa.push(fit.xmin+(fit.xmax-fit.xmin)*i/N);
+    const up=xa.map(x=>`${X(x).toFixed(1)},${Y(fit.band(x)[1]).toFixed(1)}`);
+    const dn=xa.slice().reverse().map(x=>`${X(x).toFixed(1)},${Y(fit.band(x)[0]).toFixed(1)}`);
+    const yl=fit.intercept+fit.slope*fit.xmin, yr=fit.intercept+fit.slope*fit.xmax;
+    fitSvg=`<g clip-path="url(#${id})">
+      <polygon points="${up.concat(dn).join(' ')}" fill="#1f8a70" fill-opacity="0.12"/>
+      <line x1="${X(fit.xmin)}" y1="${Y(yl)}" x2="${X(fit.xmax)}" y2="${Y(yr)}" stroke="#1f8a70" stroke-width="2"/></g>`;
+    const eq=`y = ${fit.slope.toFixed(2)}x ${fit.intercept<0?'−':'+'} ${Math.abs(fit.intercept).toFixed(1)}`;
+    const lx=m.l+12, ly=m.t+10;
+    legend=`<g font-size="11.5" fill="#16232b">
+      <rect x="${lx-6}" y="${ly-4}" width="196" height="62" rx="5" fill="#fff" fill-opacity="0.9" stroke="#dbe1e0"/>
+      <line x1="${lx}" y1="${ly+8}" x2="${lx+22}" y2="${ly+8}" stroke="#1f8a70" stroke-width="2"/>
+      <text x="${lx+28}" y="${ly+12}" font-family="ui-monospace, Menlo, Consolas, monospace">${eq}</text>
+      <line x1="${lx}" y1="${ly+26}" x2="${lx+22}" y2="${ly+26}" stroke="#8fa1a8" stroke-dasharray="4 4"/>
+      <text x="${lx+28}" y="${ly+30}">y = x (equality)</text>
+      <text x="${lx}" y="${ly+48}">r = ${fit.r.toFixed(3)}  R² = ${fit.r2.toFixed(3)}  ρc = ${fit.ccc.toFixed(3)}</text></g>`;
+  }
+  const dots=ghost.map(p=>`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="4" fill="none" stroke="#b9c4c8" stroke-width="1"/>`).join('')
+    + pts.map(p=>`<circle cx="${X(p.x)}" cy="${Y(p.y)}" r="4.5" fill="#2a6f97" fill-opacity="0.75" stroke="#16232b" stroke-width=".5"/>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${ylab} versus ${xlab}">
+    ${clip}${g}${extra}${fitSvg}${dots}${legend}
+    <text x="${m.l+(W-m.l-m.r)/2}" y="${H-6}" font-size="12" fill="#4a5b64" text-anchor="middle">${xlab}</text>
+    <text x="16" y="${m.t+(H-m.t-m.b)/2}" font-size="12" fill="#4a5b64" text-anchor="middle" transform="rotate(-90 16 ${m.t+(H-m.t-m.b)/2})">${ylab}</text>
+  </svg>`;
+}
+function niceStep(x){ const p=Math.pow(10,Math.floor(Math.log10(x))); const f=x/p;
+  return (f<1.5?1:f<3?2:f<7?5:10)*p; }
+
+/* SRT table + CSV */
+function srtTable() {
+  const host = document.getElementById('srtTable');
+  const rows = state.cur.slice().sort((a,b)=>
+    a.participant.localeCompare(b.participant, undefined, {numeric:true})||a.language.localeCompare(b.language)||
+    a.ear.localeCompare(b.ear)||a.repeat-b.repeat);
+  host.innerHTML = `<table><thead><tr>
+    <th>Participant</th><th>Test</th><th>Ear</th><th>Rep</th><th>Lists</th>
+    <th class="num">SRT@20</th><th class="num">SRT@30</th><th class="num">Δ(30−20)</th>
+    <th class="num">Rev</th><th class="num">SE</th><th>Fit</th><th class="num">PTA</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td>${r.participant}</td><td>${r.language==='maori'?'Māori':'English'}</td>
+      <td>${r.ear}</td><td>${r.repeat}</td><td>${r.lists}</td>
+      <td class="num">${fmt(r.srt20)}</td><td class="num">${fmt(r.srt30)}</td>
+      <td class="num">${r.srt20!=null&&r.srt30!=null?fmt(r.srt30-r.srt20):'—'}</td>
+      <td class="num">${r.reversals==null?'—':r.reversals}</td>
+      <td class="num">${r.seSrt==null?'—':fmt(r.seSrt,2)}</td>
+      <td>${r.method && r.method!=='free-slope' ? r.method : ''}</td>
+      <td class="num">${fmt(r.pta)}</td></tr>`).join('')}
+  </tbody></table>`;
+}
+document.getElementById('csvBtn').onclick = () => {
+  applyPtaSource(); fitNonAdaptive(); state.offset = computeOffset(); applyOffset(state.offset.value);
+  const ethCols = state.demo ? state.demo.ethCols : [];
+  const head = ['participant','language','ear','repeat','lists','srt20_dB','srt30_dB','trunc_30_minus_20','reversals','se_srt_dB','fit_method',
+    'pta_dBHL_json','pta_dBHL_sheet','converged','file','srt30_raw_dB','srt20_raw_dB','acoustic_offset_applied_dB','nonadaptive_english_srt_this_ear',
+    'age','age_band','gender', ...ethCols.map(c=>c.key), 'eth_prioritised','trm_prof'];
+  const rows = state.records.map(r => {
+    const dm = demoFor(r.participant) || {};
+    return [r.participant,r.language,r.ear,r.repeat,r.lists,
+      r.srt20??'',r.srt30??'',(r.srt20!=null&&r.srt30!=null)?(r.srt30-r.srt20).toFixed(2):'',
+      r.reversals??'',r.seSrt??'',r.method??'',r.ptaJson??'',r.ptaSheet??'',r.converged?1:0,r.file,
+      r.srt30raw??'',r.srt20raw??'',r.language==='maori'?(state.offset?.value||0):0, naSrt(r.participant,r.ear)!=null?naSrt(r.participant,r.ear).toFixed(2):'',
+      dm.age??'', dm.age!=null?ageBand(dm.age):'', dm.gender??'', ...ethCols.map(c=>dm.eth?.[c.key]??''),
+      dm.ethPrioritised??'', dm.trm??''];
+  });
+  const csv = [head, ...rows].map(row=>row.map(c=>/[",\n]/.test(String(c))?`"${String(c).replace(/"/g,'""')}"`:c).join(',')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download='srt_table.csv'; a.click(); URL.revokeObjectURL(a.href);
+};
+
+/* Step 3 — provisional variance decomposition (person-varying offset) */
+function step3(P) {
+  const host = document.getElementById('step3');
+  const byP = groupBy(P, p=>p.participant);
+  const persons = Object.keys(byP);
+  if (persons.length < 2) {
+    host.innerHTML = `<p class="empty">Need ≥2 participants to say anything about between-person offset spread (τ_pm).</p>
+      <div class="note">τ_pm — how much the Māori−English offset varies between people — is the key output of Step 3
+      and decides whether one correction factor works. It needs a mixed-effects model (lme4) in R; this page can't
+      estimate it properly. Once you have several participants, compute it there.</div>`;
+    return;
+  }
+  // Provisional: per-person mean difference; the SD of those person means is a
+  // rough, biased proxy for τ_pm (it still contains within-person error/√k).
+  const perPersonMean = persons.map(p => S.mean(byP[p].map(x=>x.diff)));
+  const between = S.sd(perPersonMean);
+  host.innerHTML = `
+    <dl class="stat">
+      <dt>Participants</dt><dd>${persons.length}</dd>
+      <dt>SD of per-person mean difference</dt><dd>${fmt(between)} dB</dd>
+    </dl>
+    <div class="note">This SD is a <b>rough upper proxy</b> for τ_pm, not τ_pm itself — it still includes each
+    person's measurement error (S_w/√k) and doesn't separate ear or list variance. Treat it only as an early
+    "is between-person spread small or large?" signal. The real τ_pm comes from the mixed model in R
+    (SRT ~ method + (method | participant) + (1 | participant:ear), separate residual SD per language).</div>`;
+}
+
+/* Step 4 — provisional Bland–Altman */
+function step4(P) {
+  const host = document.getElementById('step4');
+  if (P.length < 2) { host.innerHTML = '<p class="empty">Need ≥2 pairs.</p>'; return; }
+  const D=P.map(p=>p.diff), m=S.mean(D), sd=S.sd(D);
+  const loa=[m-1.96*sd, m+1.96*sd];
+  // BA plot: mean vs difference
+  const pts = P.map(p=>({x:(p.maori+p.english)/2, y:p.diff}));
+  const plot = scatter(pts, 'mean of Māori & English SRT dB(A)', 'difference dB', false, null,
+    ghostP.map(p=>({x:(p.maori+p.english)/2, y:p.diff})));
+  host.innerHTML = `
+    <dl class="stat">
+      <dt>Bias (mean difference)</dt><dd>${fmt(m)} dB</dd>
+      <dt>95% limits of agreement</dt><dd>${fmt(loa[0])} to ${fmt(loa[1])} dB</dd>
+    </dl>
+    <figure>${plot}<figcaption>${offsetNote()}${ghostNote(P.length)}Difference vs mean of the two tests. Dashed: bias and ±1.96 SD limits.</figcaption></figure>
+    <div class="note">These are <b>naïve</b> limits: they treat every ear/repeat as an independent subject.
+    The plan calls for the <b>repeated-measures</b> Bland–Altman (single-administration) which widens the limits
+    correctly for the clustering — a small R computation. Use these only to eyeball outliers and rough width.</div>`;
+}
+function baPlot(pts, bias, loa) {
+  const base = scatter(pts, 'mean of Māori & English SRT dB(A)', 'difference dB', false);
+  return base; // horizontal 0-line already drawn; bias/LoA quoted in the stats above
+}
+
+/* Step 6 — within-subject SD and repeatability, per language */
+function step6() {
+  const host = document.getElementById('step6');
+  const langs = ['maori','english'];
+  const rows = langs.map(lang => swFor(state.cur, lang));
+  host.innerHTML = `<table><thead><tr><th>Test</th><th class="num">S_w @20</th><th class="num">S_w @30</th>
+    <th class="num">RC (2.77·S_w@30)</th><th class="num">ear×person cells</th></tr></thead><tbody>
+    ${rows.map(r=>`<tr><td>${r.lang==='maori'?'Māori (CVCV)':'English (CVC)'}</td>
+      <td class="num">${fmt(r.sw20)}</td><td class="num">${fmt(r.sw30)}</td>
+      <td class="num">${fmt(r.rc30)}</td><td class="num">${r.cells}</td></tr>`).join('')}
+  </tbody></table>
+  <p class="sub">S_w is pooled from repeats within each participant×ear cell (needs ≥2 repeats to contribute).
+  RC = 2.77·S_w is how far two repeats of the <em>same</em> test may differ by chance. The decision rule in the
+  plan reads S_w@20: if it climbs much above ~6 dB, the 20-word clinical track is in question.</p>`;
+}
+function swFor(records, lang) {
+    // Group repeats within participant+ear for this language.
+    const grp = groupBy(records.filter(r=>r.language===lang && r.srt30!=null),
+      r=>[r.participant,r.ear].join('|'));
+    // Within-cell variance from repeats (need ≥2 repeats per cell).
+    const cellVars=[], cellVars20=[];
+    Object.values(grp).forEach(cell=>{
+      const v30=cell.map(c=>c.srt30); if (v30.length>=2){ const s=S.sd(v30); cellVars.push(s*s*(v30.length-1)); }
+      const v20=cell.map(c=>c.srt20).filter(x=>x!=null); if (v20.length>=2){ const s=S.sd(v20); cellVars20.push(s*s*(v20.length-1)); }
+    });
+    const dfsum = Object.values(grp).reduce((s,c)=>s+Math.max(0,c.length-1),0);
+    const sw30 = cellVars.length ? Math.sqrt(cellVars.reduce((s,x)=>s+x,0)/dfsum) : NaN;
+    const dfsum20 = Object.values(grp).reduce((s,c)=>{const k=c.filter(x=>x.srt20!=null).length; return s+Math.max(0,k-1);},0);
+    const sw20 = cellVars20.length ? Math.sqrt(cellVars20.reduce((s,x)=>s+x,0)/dfsum20) : NaN;
+    return { lang, sw20, sw30, rc30: sw30*2.77, cells: Object.keys(grp).length };
+}
+
+/* Step 7 — truncation SRT(30) − SRT(20) */
+function step7() {
+  const host = document.getElementById('step7');
+  const rows = state.cur.filter(r=>r.srt20!=null && r.srt30!=null);
+  if (!rows.length){ host.innerHTML='<p class="empty">No tracks with both SRT@20 and SRT@30.</p>'; return; }
+  const diffs = rows.map(r=>r.srt30-r.srt20);
+  const tol = 5;
+  const outside = diffs.filter(d=>Math.abs(d)>tol).length;
+  host.innerHTML = `
+    <dl class="stat">
+      <dt>Tracks with both estimates</dt><dd>${rows.length}</dd>
+      <dt>Mean SRT(30) − SRT(20)</dt><dd>${fmt(S.mean(diffs))} dB</dd>
+      <dt>SD of the difference</dt><dd>${fmt(S.sd(diffs))} dB</dd>
+      <dt>|difference| &gt; ${tol} dB</dt><dd>${outside} of ${rows.length} (${fmt(100*outside/rows.length,0)}%)</dd>
+    </dl>
+    <p class="sub">This is the evidence for the clinical 20-vs-30-word recommendation. The plan's rule flags 30 words
+    if &gt;~5% of tracks exceed tolerance, if S_w@20 ≳ 6 dB (Step 6), or if this difference grows with PTA.</p>`;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Demographics spreadsheet → per-participant attributes
+   ═════════════════════════════════════════════════════════════════════════ */
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const ETH_LABELS = { maori:'Māori', pakeha:'Pākehā / NZ European', european:'NZ European', nzeuro:'NZ European',
+  asian:'Asian', pacific:'Pacific', melaa:'MELAA', other:'Other' };
+// Stats NZ prioritised ethnicity order (Māori > Pacific > Asian > MELAA > Other > European).
+const ETH_PRIORITY = ['maori','pacific','asian','melaa','other','pakeha','european','nzeuro'];
+const ethLabel = code => ETH_LABELS[code] || code.replace(/_/g,' ').replace(/^\w/, c=>c.toUpperCase());
+
+function loadDemographics(file) {
+  const isCsv = /\.csv$/i.test(file.name);
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      let rows;
+      if (isCsv) rows = parseCsv(ev.target.result);
+      else {
+        if (typeof XLSX === 'undefined')
+          throw new Error('the spreadsheet reader (SheetJS) did not load — save the sheet as .csv and drop that instead');
+        const wb = XLSX.read(ev.target.result, { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        // Excel tables often claim every column to XFD; trim the range to cells that hold data.
+        let maxR = 0, maxC = 0;
+        Object.keys(ws).forEach(k => { if (k[0] === '!') return; const v = ws[k].v;
+          if (v === null || v === undefined || v === '') return;
+          const c = XLSX.utils.decode_cell(k);
+          if (c.r > 0) { maxC = Math.max(maxC, c.c); maxR = Math.max(maxR, c.r); } });
+        ws['!ref'] = XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: maxR, c: maxC } });
+        rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true, blankrows: false });
+      }
+      state.demo = parseDemographics(rows, file.name);
+    } catch (e) {
+      state.demo = { file: file.name, error: e.message, byId: {}, ethCols: [], extraCols: [], warnings: [] };
+    }
+    renderDemoStatus(); renderLoaded(); rerun();
+  };
+  isCsv ? reader.readAsText(file) : reader.readAsArrayBuffer(file);
+}
+
+function parseCsv(text) {
+  const rows = []; let row = [], cell = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) { if (c === '"') { if (text[i+1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+    else if (c === '"') q = true;
+    else if (c === ',') { row.push(cell); cell = ''; }
+    else if (c === '\n' || c === '\r') { if (c === '\r' && text[i+1] === '\n') i++; row.push(cell); rows.push(row); row = []; cell = ''; }
+    else cell += c;
+  }
+  if (cell !== '' || row.length) { row.push(cell); rows.push(row); }
+  return rows.map(r => r.map(v => { const s = v.trim(); return s === '' ? null : (isFinite(s) ? Number(s) : s); }));
+}
+
+function parseDemographics(rows, fileName) {
+  const isBlank = v => v === null || v === undefined || String(v).trim() === '';
+  const hIdx = rows.findIndex(r => r && r.some(c => /participant|^\s*id\s*$/i.test(String(c ?? ''))));
+  if (hIdx < 0) throw new Error('no header row with a "Participant" column');
+  const head = rows[hIdx].map(h => String(h ?? '').trim());
+  const body = rows.slice(hIdx + 1).filter(r => r && r.some(c => !isBlank(c)));
+  const hasData = j => body.some(r => !isBlank(r[j]));
+  const find = re => head.findIndex((h, j) => re.test(h) && hasData(j));
+  const col = {
+    id:     head.findIndex(h => /participant|^id$/i.test(h)),
+    age:    find(/^age\b/i),
+    gender: find(/gender|^sex$/i),
+    ptaR:   find(/pta.*(\bR\b|right)/i),
+    ptaL:   find(/pta.*(\bL\b|left)/i),
+    trm:    find(/trm|te reo|reo|proficien/i)
+  };
+  const used = new Set(Object.values(col).filter(j => j >= 0));
+  const ethCols = [];
+  head.forEach((h, j) => { const m = h.match(/^eth[_\s-]*(.+)$/i);
+    if (m && hasData(j)) { const code = m[1].trim().toLowerCase().replace(/[^a-z]/g,'');
+      ethCols.push({ j, key: 'eth_' + code, code, label: ethLabel(code) }); used.add(j); } });
+  // Anything else with data is kept: numeric columns become explorer variables, text ones segments.
+  const extraCols = [];
+  head.forEach((h, j) => { if (used.has(j) || !h || !hasData(j)) return;
+    const vals = body.map(r => r[j]).filter(v => !isBlank(v));
+    extraCols.push({ j, name: h, numeric: vals.every(v => Number.isFinite(Number(v))) }); });
+
+  const num = v => isBlank(v) ? null : (Number.isFinite(Number(v)) ? Number(v) : null);
+  const byId = {}, warnings = [];
+  body.forEach(r => {
+    if (isBlank(r[col.id])) return;
+    const id = normId(r[col.id]);
+    if (byId[id]) warnings.push(`participant ${id} appears more than once — the last row is used`);
+    let gender = col.gender >= 0 && !isBlank(r[col.gender]) ? String(r[col.gender]).trim() : null;
+    if (gender && gender.length <= 2) gender = gender.toUpperCase();
+    const eth = {}; ethCols.forEach(c => { const v = num(r[c.j]); eth[c.key] = v === null ? null : (v > 0 ? 1 : 0); });
+    const ethCodes = ethCols.filter(c => eth[c.key] === 1).map(c => c.code);
+    const pri = ETH_PRIORITY.find(c => ethCodes.includes(c)) || ethCodes[0] || null;
+    const extra = {}; extraCols.forEach(c => { const v = r[c.j]; extra[c.name] = isBlank(v) ? null : (c.numeric ? Number(v) : String(v).trim()); });
+    byId[id] = {
+      id, age: col.age >= 0 ? num(r[col.age]) : null, gender,
+      ptaR: col.ptaR >= 0 ? num(r[col.ptaR]) : null, ptaL: col.ptaL >= 0 ? num(r[col.ptaL]) : null,
+      trm: col.trm >= 0 ? num(r[col.trm]) : null,
+      eth, ethList: ethCodes.map(ethLabel), ethCount: ethCols.length ? ethCodes.length : null,
+      ethPrioritised: pri ? ethLabel(pri) : null, extra
+    };
+  });
+  const missing = Object.entries({ Age: col.age, Gender: col.gender, 'PTA average R': col.ptaR,
+    'PTA average L': col.ptaL, 'TRM prof': col.trm }).filter(([,j]) => j < 0).map(([k]) => k);
+  if (!ethCols.length) missing.push('eth_* columns');
+  if (missing.length) warnings.push('columns not found: ' + missing.join(', '));
+  return { file: fileName, byId, ethCols, extraCols, warnings, col };
+}
+
+const demoFor = pid => (state.demo && state.demo.byId[pid]) || null;
+
+function ageCuts() {
+  return (document.getElementById('ageCuts').value || '').split(/[,;\s]+/).map(Number)
+    .filter(Number.isFinite).sort((a,b)=>a-b);
+}
+function ageBand(age) {
+  const c = ageCuts(); if (!c.length) return 'all ages';
+  if (age < c[0]) return `under ${c[0]}`;
+  for (let i = 0; i < c.length - 1; i++) if (age < c[i+1]) return `${c[i]}–${c[i+1]-1}`;
+  return `${c[c.length-1]}+`;
+}
+function ageBandLabels() {
+  const c = ageCuts(); if (!c.length) return ['all ages'];
+  return [`under ${c[0]}`, ...c.slice(0,-1).map((v,i)=>`${v}–${c[i+1]-1}`), `${c[c.length-1]}+`];
+}
+
+/* Segment definitions: each maps a participant's demographics to group label(s). */
+function segmentDefs() {
+  const D = state.demo; if (!D || D.error) return [];
+  const defs = [];
+  if (D.col.age >= 0) defs.push({ id:'age', label:'Age band', get: d => d.age != null ? [ageBand(d.age)] : [], order: ageBandLabels() });
+  if (D.col.gender >= 0) defs.push({ id:'gender', label:'Gender', get: d => d.gender ? [d.gender] : [] });
+  if (D.ethCols.some(c => c.code === 'maori'))
+    defs.push({ id:'ethMaori', label:'Ethnicity — Māori / non-Māori', order:['Māori','non-Māori'],
+      get: d => d.ethCount ? [d.eth.eth_maori === 1 ? 'Māori' : 'non-Māori'] : [] });
+  if (D.ethCols.length) {
+    const ord = ETH_PRIORITY.map(ethLabel);
+    defs.push({ id:'ethPri', label:'Ethnicity — prioritised (Stats NZ order)', order: ord, get: d => d.ethPrioritised ? [d.ethPrioritised] : [] });
+    defs.push({ id:'ethTot', label:'Ethnicity — total response (groups overlap)', multi: true, order: ord, get: d => d.ethList });
+  }
+  if (D.col.trm >= 0) {
+    defs.push({ id:'trm', label:'Te reo Māori proficiency (each level)', get: d => d.trm != null ? ['level ' + d.trm] : [] });
+    defs.push({ id:'trmGrp', label:'Te reo Māori proficiency (1–2 / 3 / 4–5)', order:['1–2','3','4–5'],
+      get: d => d.trm == null ? [] : [d.trm <= 2 ? '1–2' : d.trm < 4 ? '3' : '4–5'] });
+  }
+  D.extraCols.filter(c => !c.numeric).forEach(c =>
+    defs.push({ id:'x:' + c.name, label: c.name, get: d => d.extra[c.name] != null ? [d.extra[c.name]] : [] }));
+  return defs;
+}
+const BUILTIN_COLOUR = [
+  { id:'@ear', label:'Ear', levels:['ear','pair','track'], rowGet: row => row.ear ? [row.ear] : [] },
+  { id:'@lang', label:'Test language', levels:['track'], rowGet: row => row.lang ? [row.lang === 'maori' ? 'Māori' : 'English'] : [] }
+];
+const NO_DEMO = '(not in spreadsheet)', BLANK = '(blank)';
+function groupsOf(def, pid) {
+  const d = demoFor(pid); if (!d) return [NO_DEMO];
+  const g = def.get(d); return g && g.length ? g : [BLANK];
+}
+function orderGroups(def, labels) {
+  const set = new Set(labels), out = [];
+  (def.order || []).forEach(l => { if (set.has(l)) { out.push(l); set.delete(l); } });
+  const rest = [...set].filter(l => l !== BLANK && l !== NO_DEMO).sort((a,b)=>a.localeCompare(b, undefined, {numeric:true}));
+  return [...out, ...rest, ...[BLANK, NO_DEMO].filter(l => set.has(l))];
+}
+const loadedPids = () => [...new Set(state.records.map(r => r.participant))];
+
+function fillSelect(sel, options, keep) {
+  const prev = keep !== undefined ? keep : sel.value;
+  sel.innerHTML = options.map(o => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join('');
+  if (options.some(o => o.value === prev)) sel.value = prev;
+}
+function populateSegmentSelects() {
+  const defs = segmentDefs();
+  fillSelect(document.getElementById('filterVar'),
+    [{ value:'', label:'— all participants —' }, ...defs.map(d => ({ value:d.id, label:d.label }))]);
+  populateFilterVals();
+  fillSelect(document.getElementById('segVar'), defs.map(d => ({ value:d.id, label:d.label })));
+  populateOffsetSelects();
+}
+function populateFilterVals() {
+  const id = document.getElementById('filterVar').value, sel = document.getElementById('filterVal');
+  const def = segmentDefs().find(d => d.id === id);
+  if (!def) { sel.innerHTML = '<option value="">—</option>'; sel.disabled = true; return; }
+  sel.disabled = false;
+  const labels = orderGroups(def, loadedPids().flatMap(p => groupsOf(def, p)));
+  fillSelect(sel, labels.map(l => ({ value:l, label:l })));
+}
+function filteredRecords() {
+  const id = document.getElementById('filterVar').value, val = document.getElementById('filterVal').value;
+  const def = segmentDefs().find(d => d.id === id);
+  if (!def || !val) return state.records.slice();
+  return state.records.filter(r => groupsOf(def, r.participant).includes(val));
+}
+function renderFilterBanner() {
+  const id = document.getElementById('filterVar').value, def = segmentDefs().find(d => d.id === id);
+  const host = document.getElementById('filterBanner');
+  if (!def) { host.innerHTML = ''; return; }
+  const nP = new Set(state.cur.map(r => r.participant)).size;
+  host.innerHTML = `<div class="note"><b>Filtered:</b> ${esc(def.label)} = <b>${esc(document.getElementById('filterVal').value)}</b>
+    — every section below uses only these ${nP} participant(s). The PTA cross-check always shows everyone.</div>`;
+}
+function applyPtaSource() {
+  const src = document.getElementById('ptaSource').value;
+  state.records.forEach(r => {
+    const d = demoFor(r.participant);
+    r.ptaSheet = d ? (r.ear === 'right' ? d.ptaR : d.ptaL) : null;
+    r.pta = src === 'sheet' ? r.ptaSheet : r.ptaJson;
+  });
+}
+function renderDemoStatus() {
+  const host = document.getElementById('demoStatus'), D = state.demo;
+  if (!D) { host.innerHTML = `No demographics spreadsheet loaded — segmentation and the PTA cross-check need one
+    (columns: Participant, Age, Gender, PTA average R/L, eth_*, TRM prof).`; return; }
+  if (D.error) { host.innerHTML = `<span class="pill bad">Couldn't read ${esc(D.file)}</span> ${esc(D.error)}.`; return; }
+  const ids = Object.keys(D.byId), pids = loadedPids();
+  const matched = pids.filter(p => D.byId[p]), noSheet = pids.filter(p => !D.byId[p]);
+  host.innerHTML = `<span class="pill ok">Demographics</span> <b>${esc(D.file)}</b> — ${ids.length} participant row(s);
+    ${pids.length ? `${matched.length} of ${pids.length} loaded JSON participant(s) matched.` : 'no JSON loaded yet.'}
+    ${noSheet.length ? `<br><span class="pill bad">Not in spreadsheet</span> ${noSheet.map(esc).join(', ')}` : ''}
+    ${D.warnings.length ? `<br><span class="pill warn">Check</span> ${D.warnings.map(esc).join('; ')}` : ''}
+    <br><span style="color:var(--mist)">Variables found: ${[D.col.age>=0&&'age', D.col.gender>=0&&'gender',
+      D.col.ptaR>=0&&'PTA R', D.col.ptaL>=0&&'PTA L', D.col.trm>=0&&'TRM prof', ...D.ethCols.map(c=>c.key),
+      ...D.extraCols.map(c=>c.name)].filter(Boolean).map(esc).join(' · ')}</span>`;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   PTA cross-check: spreadsheet "PTA average" vs the audiogram stored in JSON
+   ═════════════════════════════════════════════════════════════════════════ */
+const PTA_TOL = 0.15;   // dB — the sheet holds 1-dp values, so ±0.05 rounding plus float slack
+const PTA_ALTS = [
+  { label:'4FA 0.5/1/2/4 kHz, unmasked only', f:[500,1000,2000,4000], unmasked:true },
+  { label:'3FA 0.5/1/2 kHz', f:[500,1000,2000] },
+  { label:'3FA 1/2/4 kHz', f:[1000,2000,4000] },
+  { label:'4FA 0.5/1/2/3 kHz', f:[500,1000,2000,3000] },
+  { label:'5FA 0.25–4 kHz', f:[250,500,1000,2000,4000] },
+  { label:'0.5–4 kHz with 3 kHz (5 freqs)', f:[500,1000,2000,3000,4000] },
+  { label:'high-frequency 2/4 kHz', f:[2000,4000] }
+];
+function ptaCheck() {
+  const host = document.getElementById('ptaCheck');
+  const D = state.demo;
+  if (!D || D.error) { host.innerHTML = '<p class="empty">Load the demographics spreadsheet to cross-check its PTA averages against the JSON audiograms.</p>'; return; }
+  const pids = Object.keys(state.audio).sort((a,b)=>a.localeCompare(b, undefined, {numeric:true}));
+  const rows = [];
+  pids.forEach(pid => {
+    const d = D.byId[pid], a = state.audio[pid];
+    ['right','left'].forEach(ear => {
+      const j = a[ear] || {}, s = d ? (ear === 'right' ? d.ptaR : d.ptaL) : null;
+      let status, cls, hint = '';
+      if (!d) { status = 'not in spreadsheet'; cls = 'bad'; }
+      else if (j.pta == null) { status = 'no audiogram in JSON'; cls = 'bad'; }
+      else if (s == null) { status = 'blank in spreadsheet'; cls = 'warn'; }
+      else if (Math.abs(j.pta - s) <= PTA_TOL) {
+        status = j.nFreq < 4 ? `match (only ${j.nFreq} freq)` : 'match'; cls = j.nFreq < 4 ? 'warn' : 'ok';
+      } else {
+        status = 'mismatch'; cls = 'bad';
+        const alts = PTA_ALTS.map(alt => { const src = alt.unmasked ? j.acU : j.ac;
+            const v = alt.f.map(k => src && src[k]).filter(x => x !== null && x !== undefined);
+            return v.length === alt.f.length ? { label: alt.label, v: S.mean(v) } : null; })
+          .filter(x => x && Math.abs(x.v - s) <= PTA_TOL);
+        if (alts.length) hint = 'spreadsheet matches ' + alts.map(x => x.label).join(' / ');
+        else if (d && Math.abs(((ear==='right'?d.ptaL:d.ptaR) ?? NaN) - j.pta) <= PTA_TOL) hint = 'matches the <b>other</b> ear — R/L swapped?';
+        else hint = 'no common averaging rule reproduces it — check the transcription';
+      }
+      rows.push({ pid, ear, j, s, diff: (j.pta != null && s != null) ? s - j.pta : null, status, cls, hint, file: a.file });
+    });
+  });
+  const sheetOnly = Object.keys(D.byId).filter(id => !state.audio[id]).sort((a,b)=>a.localeCompare(b, undefined, {numeric:true}));
+  const nOk = rows.filter(r => r.cls === 'ok').length, bad = rows.filter(r => r.cls !== 'ok');
+  const table = list => `<div class="scroll"><table><thead><tr><th>Participant</th><th>Ear</th>
+      <th class="num">JSON 4FA</th><th class="num">Freqs (masked)</th><th class="num">Spreadsheet</th>
+      <th class="num">Sheet − JSON</th><th>Status</th><th>Note</th></tr></thead><tbody>
+    ${list.map(r => `<tr><td>${esc(r.pid)}</td><td>${r.ear}</td><td class="num">${fmt(r.j.pta,2)}</td>
+      <td class="num">${r.j.nFreq ? `${r.j.nFreq}${r.j.masked ? ` (${r.j.masked})` : ''}` : '—'}</td>
+      <td class="num">${fmt(r.s)}</td><td class="num">${r.diff == null ? '—' : fmt(r.diff,2)}</td>
+      <td><span class="pill ${r.cls}">${r.status}</span></td><td style="font-size:.85rem">${r.hint}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  host.innerHTML = `
+    <p><span class="pill ${bad.length ? 'warn' : 'ok'}">${nOk} of ${rows.length} ears agree</span>
+      within ±${PTA_TOL} dB (the spreadsheet is to 1 decimal place). JSON PTA = mean AC threshold at 0.5, 1, 2 and
+      4 kHz, using the masked threshold at any frequency where one was recorded.</p>
+    ${bad.length ? `<h3>Needs a look (${bad.length})</h3>${table(bad)}` : ''}
+    <details class="card"><summary>All ${rows.length} ears</summary>${table(rows)}</details>
+    ${sheetOnly.length ? `<p class="sub">In the spreadsheet but no JSON loaded: ${sheetOnly.map(esc).join(', ')}.</p>` : ''}`;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Segmented analysis
+   ═════════════════════════════════════════════════════════════════════════ */
+function perParticipant(records) {
+  // One summary row per participant — the honest unit for between-group comparisons.
+  const P = pairs(records);
+  return Object.entries(groupBy(records, r => r.participant)).map(([pid, recs]) => {
+    const pp = P.filter(p => p.participant === pid);
+    const m = recs.filter(r => r.language === 'maori' && r.srt30 != null).map(r => r.srt30);
+    const e = recs.filter(r => r.language === 'english' && r.srt30 != null).map(r => r.srt30);
+    const tr = recs.filter(r => r.srt20 != null && r.srt30 != null).map(r => r.srt30 - r.srt20);
+    return { pid, nPairs: pp.length, diff: pp.length ? S.mean(pp.map(p => p.diff)) : null,
+             maori: m.length ? S.mean(m) : null, english: e.length ? S.mean(e) : null,
+             trunc: tr.length ? S.mean(tr) : null };
+  });
+}
+function groupStats(records) {
+  const P = pairs(records), D = P.map(p => p.diff), n = D.length;
+  const out = { nP: new Set(records.map(r => r.participant)).size, n, P };
+  out.maori = S.mean(records.filter(r => r.language === 'maori' && r.srt30 != null).map(r => r.srt30));
+  out.english = S.mean(records.filter(r => r.language === 'english' && r.srt30 != null).map(r => r.srt30));
+  out.mean = S.mean(D); out.sd = S.sd(D);
+  if (n >= 2) { const t = S.tinv(0.95, n-1), se = out.sd/Math.sqrt(n);
+    out.ci90 = [out.mean - t*se, out.mean + t*se]; out.tost5 = out.ci90[0] > -5 && out.ci90[1] < 5; }
+  out.swM = swFor(records, 'maori').sw30; out.swE = swFor(records, 'english').sw30;
+  const fit = S.regress(P.map(p => ({ x: p.english, y: p.maori })));
+  out.r = fit ? fit.r : NaN; out.ccc = fit ? fit.ccc : NaN;
+  const earPta = {}; records.forEach(r => { if (r.pta != null) earPta[r.participant + '|' + r.ear] = r.pta; });
+  out.pta = S.mean(Object.values(earPta));
+  const ages = [...new Set(records.map(r => r.participant))].map(p => demoFor(p)?.age).filter(Number.isFinite);
+  out.age = S.mean(ages);
+  return out;
+}
+function segmented() {
+  const host = document.getElementById('segOut');
+  const def = segmentDefs().find(d => d.id === document.getElementById('segVar').value);
+  if (!def) { host.innerHTML = '<p class="empty">Load the demographics spreadsheet to segment by age, gender, ethnicity and te reo proficiency.</p>'; return; }
+  const pids = [...new Set(state.cur.map(r => r.participant))];
+  const labels = orderGroups(def, pids.flatMap(p => groupsOf(def, p)));
+  const groups = labels.map(g => {
+    const recs = state.cur.filter(r => groupsOf(def, r.participant).includes(g));
+    return { g, recs, st: groupStats(recs), pp: perParticipant(recs) };
+  });
+  const pTxt = p => !Number.isFinite(p) ? '—' : p < 0.001 ? '&lt; 0.001' : p.toFixed(3);
+  const tbl = `<div class="scroll"><table><thead><tr><th>Group</th><th class="num">People</th><th class="num">Pairs</th>
+      <th class="num">Māori SRT</th><th class="num">English SRT</th><th class="num">Mean diff (M−E)</th>
+      <th class="num">90% CI</th><th>±5 dB</th><th class="num">SD diff</th><th class="num">S_w Māori</th>
+      <th class="num">S_w English</th><th class="num">r</th><th class="num">ρ<sub>c</sub></th>
+      <th class="num">PTA</th><th class="num">Age</th></tr></thead><tbody>
+    ${groups.map(({ g, st }) => `<tr><td>${esc(g)}</td><td class="num">${st.nP}</td><td class="num">${st.n}</td>
+      <td class="num">${fmt(st.maori)}</td><td class="num">${fmt(st.english)}</td><td class="num"><b>${fmt(st.mean)}</b></td>
+      <td class="num">${st.ci90 ? `${fmt(st.ci90[0])} to ${fmt(st.ci90[1])}` : '—'}</td>
+      <td>${st.ci90 ? (st.tost5 ? '<b style="color:var(--spearmint)">equiv.</b>' : 'not shown') : '—'}</td>
+      <td class="num">${fmt(st.sd)}</td><td class="num">${fmt(st.swM)}</td><td class="num">${fmt(st.swE)}</td>
+      <td class="num">${fmt(st.r,2)}</td><td class="num">${fmt(st.ccc,2)}</td>
+      <td class="num">${fmt(st.pta)}</td><td class="num">${fmt(st.age)}</td></tr>`).join('')}
+    </tbody></table></div>`;
+
+  // Between-group test on participant-level means (avoids treating ears/repeats as independent).
+  const metric = document.getElementById('segMetric').value;
+  const metricLabel = { diff:'mean Māori − English difference', maori:'mean Māori SRT', english:'mean English SRT', trunc:'mean SRT(30) − SRT(20)' }[metric];
+  const real = groups.filter(x => x.g !== BLANK && x.g !== NO_DEMO)
+    .map(x => ({ g: x.g, v: x.pp.map(p => p[metric]).filter(Number.isFinite) })).filter(x => x.v.length);
+  let test = '';
+  if (def.multi) test = `<div class="note">Total-response ethnicity counts a person in every group they ticked, so the
+    groups overlap and no between-group test is run. Use the prioritised or Māori/non-Māori grouping for a test.</div>`;
+  else if (real.length === 2) {
+    const w = S.welch(real[0].v, real[1].v);
+    test = w ? `<p>Welch t-test on per-participant ${metricLabel}: ${esc(real[0].g)} − ${esc(real[1].g)} =
+      <b>${fmt(w.diff)} dB</b>, t(${fmt(w.df,1)}) = ${fmt(w.t,2)}, p = ${pTxt(w.p)}.</p>` : '';
+  } else if (real.length > 2) {
+    const a = S.anova(real.map(x => x.v));
+    test = a ? `<p>One-way ANOVA on per-participant ${metricLabel}: F(${a.df1}, ${a.df2}) = ${fmt(a.F,2)},
+      p = ${pTxt(a.p)}, η² = ${fmt(a.eta2,2)}.</p>` : '';
+  }
+  host.innerHTML = tbl + test + `<figure>${stripPlot(groups, metric)}<figcaption>Each dot is one participant's
+    ${metricLabel}; bars are the group mean ± 95% CI across participants.${metric === 'diff' ? ' Shaded: the ±5 dB equivalence margin.' : ''}
+    Hover a dot for the participant ID.</figcaption></figure>
+    <div class="note">Within-group statistics (CI, TOST, r, ρ<sub>c</sub>) treat ears and repeats as independent, like the
+    rest of this page, and many groups are small — read these as descriptive. The between-group test uses one value per
+    participant. For the thesis, add the segment as a fixed effect (and its interaction with method) in the R mixed model.</div>`;
+}
+function stripPlot(groups, metric) {
+  const W = 640, H = 340, m = { l: 56, r: 16, t: 16, b: 58 };
+  const cols = groups.map(x => ({ g: x.g, pts: x.pp.filter(p => Number.isFinite(p[metric])) }));
+  const vals = cols.flatMap(c => c.pts.map(p => p[metric]));
+  if (!vals.length) return '<p class="empty">No values to plot.</p>';
+  let ymin = Math.min(...vals), ymax = Math.max(...vals);
+  if (metric === 'diff') { ymin = Math.min(ymin, -6); ymax = Math.max(ymax, 6); }
+  const pad = (ymax - ymin || 10) * 0.08; ymin -= pad; ymax += pad;
+  const bw = (W - m.l - m.r) / cols.length;
+  const X = i => m.l + bw * (i + 0.5), Y = v => H - m.b - (v - ymin) / (ymax - ymin) * (H - m.t - m.b);
+  const step = niceStep((ymax - ymin) / 5); let g = '';
+  for (let v = Math.ceil(ymin/step)*step; v <= ymax; v += step) { const vv = +v.toFixed(2);
+    g += `<line x1="${m.l}" y1="${Y(vv)}" x2="${W-m.r}" y2="${Y(vv)}" stroke="#eef1f0"/>
+      <text x="${m.l-8}" y="${Y(vv)+4}" font-size="11" fill="#8fa1a8" text-anchor="end">${vv}</text>`; }
+  if (metric === 'diff') g += `<rect x="${m.l}" y="${Y(5)}" width="${W-m.l-m.r}" height="${Y(-5)-Y(5)}" fill="#1f8a70" fill-opacity="0.07"/>
+      <line x1="${m.l}" y1="${Y(0)}" x2="${W-m.r}" y2="${Y(0)}" stroke="#8fa1a8" stroke-dasharray="4 4"/>`;
+  let marks = '';
+  cols.forEach((c, i) => {
+    const vs = c.pts.map(p => p[metric]);
+    c.pts.forEach((p, k) => { const jit = ((k * 0.618) % 1 - 0.5) * Math.min(bw * 0.45, 60);
+      marks += `<circle cx="${(X(i)+jit).toFixed(1)}" cy="${Y(p[metric]).toFixed(1)}" r="4.5" fill="#2a6f97" fill-opacity="0.7"
+        stroke="#fff" stroke-width="1"><title>P${esc(p.pid)}: ${fmt(p[metric])} dB${metric==='diff'?` (${p.nPairs} pairs)`:''}</title></circle>`; });
+    if (vs.length) { const mu = S.mean(vs), half = vs.length >= 2 ? S.tinv(0.975, vs.length-1) * S.sd(vs)/Math.sqrt(vs.length) : 0;
+      const x0 = X(i) + Math.min(bw * 0.3, 40);
+      marks += `<line x1="${x0}" y1="${Y(mu-half)}" x2="${x0}" y2="${Y(mu+half)}" stroke="#16232b" stroke-width="2"/>
+        <line x1="${x0-7}" y1="${Y(mu)}" x2="${x0+7}" y2="${Y(mu)}" stroke="#16232b" stroke-width="3"/>`; }
+    const lab = c.g.length > 18 ? c.g.slice(0, 17) + '…' : c.g;
+    marks += `<text x="${X(i)}" y="${H-m.b+16}" font-size="11.5" fill="#4a5b64" text-anchor="middle">${esc(lab)}</text>
+      <text x="${X(i)}" y="${H-m.b+30}" font-size="10.5" fill="#8fa1a8" text-anchor="middle">n = ${c.pts.length}</text>`;
+  });
+  const ylab = { diff:'Māori − English (dB)', maori:'Māori SRT dB(A)', english:'English SRT dB(A)', trunc:'SRT30 − SRT20 (dB)' }[metric];
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${ylab} by group">${g}${marks}
+    <text x="16" y="${m.t+(H-m.t-m.b)/2}" font-size="12" fill="#4a5b64" text-anchor="middle" transform="rotate(-90 16 ${m.t+(H-m.t-m.b)/2})">${ylab}</text></svg>`;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Explorer: X–Y plot of any variable against any other, at a chosen unit
+   ═════════════════════════════════════════════════════════════════════════ */
+const fin = v => (v === null || v === undefined || !Number.isFinite(Number(v))) ? null : Number(v);
+const meanOrNull = a => { const v = a.map(fin).filter(x => x !== null); return v.length ? S.mean(v) : null; };
+const sdOrNull = a => { const v = a.map(fin).filter(x => x !== null); return v.length >= 2 ? S.sd(v) : null; };
+
+function demoVars() {
+  const D = state.demo, out = [];
+  if (!D || D.error) return out;
+  const v = (key, label, get) => out.push({ key, label, get: row => { const d = demoFor(row.pid); return d ? fin(get(d)) : null; } });
+  if (D.col.age >= 0) v('age', 'Age (years)', d => d.age);
+  if (D.col.trm >= 0) v('trm', 'Te reo Māori proficiency (TRM prof)', d => d.trm);
+  if (D.ethCols.length) v('ethCount', 'Number of ethnicities ticked', d => d.ethCount);
+  D.ethCols.forEach(c => v(c.key, `Ethnicity: ${c.label} (0/1)`, d => d.eth[c.key]));
+  D.extraCols.filter(c => c.numeric).forEach(c => v('x:' + c.name, c.name, d => d.extra[c.name]));
+  return out;
+}
+function ptaVarsParticipant() {
+  const out = [], j = (pid, ear) => fin(state.audio[pid]?.[ear]?.pta), s = (pid, ear) => { const d = demoFor(pid); return d ? fin(ear === 'right' ? d.ptaR : d.ptaL) : null; };
+  [['json', 'JSON audiogram', j], ['sheet', 'spreadsheet', s]].forEach(([k, lab, f]) => {
+    out.push({ key: `pta_${k}_R`, label: `PTA right (${lab})`, get: r => f(r.pid, 'right') });
+    out.push({ key: `pta_${k}_L`, label: `PTA left (${lab})`, get: r => f(r.pid, 'left') });
+    out.push({ key: `pta_${k}_mean`, label: `PTA mean of ears (${lab})`, get: r => meanOrNull([f(r.pid,'right'), f(r.pid,'left')]) });
+    out.push({ key: `pta_${k}_better`, label: `PTA better ear (${lab})`, get: r => { const a=[f(r.pid,'right'),f(r.pid,'left')].filter(x=>x!==null); return a.length===2?Math.min(...a):null; } });
+    out.push({ key: `pta_${k}_worse`, label: `PTA worse ear (${lab})`, get: r => { const a=[f(r.pid,'right'),f(r.pid,'left')].filter(x=>x!==null); return a.length===2?Math.max(...a):null; } });
+    out.push({ key: `pta_${k}_asym`, label: `PTA asymmetry |R − L| (${lab})`, get: r => { const a=[f(r.pid,'right'),f(r.pid,'left')]; return a.every(x=>x!==null)?Math.abs(a[0]-a[1]):null; } });
+  });
+  return out;
+}
+function earPtaVars() {
+  return [
+    { key:'na_ear', label:'Non-adaptive English SRT, this ear dB(A)', get: r => naSrt(r.pid, r.ear) },
+    { key:'pta_json', label:'PTA this ear (JSON audiogram)', get: r => fin(state.audio[r.pid]?.[r.ear]?.pta) },
+    { key:'pta_sheet', label:'PTA this ear (spreadsheet)', get: r => { const d = demoFor(r.pid); return d ? fin(r.ear==='right'?d.ptaR:d.ptaL) : null; } },
+    { key:'pta_gap', label:'PTA this ear: spreadsheet − JSON', get: r => { const d = demoFor(r.pid), j = fin(state.audio[r.pid]?.[r.ear]?.pta);
+        const s = d ? fin(r.ear==='right'?d.ptaR:d.ptaL) : null; return j!==null && s!==null ? s-j : null; } }
+  ];
+}
+
+// Builds { rows, vars } for the chosen unit. Each row: { pid, ear?, lang?, tip, data } and vars read from it.
+function explorerData(level, recs = state.cur) {
+  const P = pairs(recs);
+  const fv = (key, label, field) => ({ key, label, get: r => fin(r.data[field]) });
+  let rows = [], vars = [];
+  if (level === 'track') {
+    rows = recs.map(r => ({ pid: r.participant, ear: r.ear, lang: r.language,
+      tip: `P${r.participant} ${r.language==='maori'?'Māori':'English'} ${r.ear} rep ${r.repeat}`,
+      data: { srt30: r.srt30, srt20: r.srt20, trunc: r.srt20!=null&&r.srt30!=null ? r.srt30-r.srt20 : null,
+              rev: r.reversals, se: r.seSrt, slope: r.slope, start: r.startLevel, rep: r.repeat } }));
+    vars = [fv('srt30','SRT @30 words dB(A)','srt30'), fv('srt20','SRT @20 words dB(A)','srt20'),
+      fv('trunc','SRT30 − SRT20 (dB)','trunc'), fv('rev','Reversals','rev'), fv('se','SE of SRT (dB)','se'),
+      fv('slope','Psychometric slope (fit)','slope'), fv('start','Start level dB(A)','start'), fv('rep','Repeat number','rep'),
+      ...earPtaVars()];
+  } else if (level === 'pair') {
+    rows = P.map(p => ({ pid: p.participant, ear: p.ear, tip: `P${p.participant} ${p.ear} rep ${p.repeat}`,
+      data: { maori: p.maori, english: p.english, diff: p.diff, avg: (p.maori+p.english)/2,
+              m20: p.maori20, e20: p.english20, d20: p.maori20!=null&&p.english20!=null ? p.maori20-p.english20 : null, rep: p.repeat } }));
+    vars = [fv('maori','Māori SRT @30 dB(A)','maori'), fv('english','English SRT @30 dB(A)','english'),
+      fv('diff','Māori − English @30 (dB)','diff'), fv('avg','Mean of Māori & English @30 dB(A)','avg'),
+      fv('m20','Māori SRT @20 dB(A)','m20'), fv('e20','English SRT @20 dB(A)','e20'),
+      fv('d20','Māori − English @20 (dB)','d20'), fv('rep','Repeat number','rep'), ...earPtaVars()];
+  } else if (level === 'ear') {
+    rows = Object.entries(groupBy(recs, r => r.participant + '|' + r.ear)).map(([k, rr]) => {
+      const [pid, ear] = k.split('|'), pp = P.filter(p => p.participant === pid && p.ear === ear);
+      const m = rr.filter(r => r.language === 'maori').map(r => r.srt30), e = rr.filter(r => r.language === 'english').map(r => r.srt30);
+      return { pid, ear, tip: `P${pid} ${ear}`, data: { maori: meanOrNull(m), english: meanOrNull(e),
+        diff: meanOrNull(pp.map(p => p.diff)), sdM: sdOrNull(m), sdE: sdOrNull(e), nPairs: pp.length } };
+    });
+    vars = [fv('maori','Mean Māori SRT dB(A)','maori'), fv('english','Mean English SRT dB(A)','english'),
+      fv('diff','Mean Māori − English (dB)','diff'), fv('sdM','SD of Māori repeats (dB)','sdM'),
+      fv('sdE','SD of English repeats (dB)','sdE'), fv('nPairs','Matched pairs','nPairs'), ...earPtaVars(),
+      { key:'eng_na', label:'Adaptive English − non-adaptive English (dB)', get: r => { const n = naSrt(r.pid, r.ear); return n !== null && fin(r.data.english) !== null ? r.data.english - n : null; } },
+      { key:'mao_na', label:'Māori − non-adaptive English (dB)', get: r => { const n = naSrt(r.pid, r.ear); return n !== null && fin(r.data.maori) !== null ? r.data.maori - n : null; } }];
+  } else {
+    rows = Object.entries(groupBy(recs, r => r.participant)).map(([pid, rr]) => {
+      const pp = P.filter(p => p.participant === pid);
+      const m = rr.filter(r => r.language === 'maori'), e = rr.filter(r => r.language === 'english');
+      return { pid, tip: `P${pid}`, data: {
+        maori: meanOrNull(m.map(r => r.srt30)), english: meanOrNull(e.map(r => r.srt30)),
+        diff: meanOrNull(pp.map(p => p.diff)), sdDiff: sdOrNull(pp.map(p => p.diff)),
+        absDiff: meanOrNull(pp.map(p => Math.abs(p.diff))),
+        maori20: meanOrNull(m.map(r => r.srt20)), english20: meanOrNull(e.map(r => r.srt20)),
+        trunc: meanOrNull(rr.map(r => r.srt20!=null&&r.srt30!=null ? r.srt30-r.srt20 : null)),
+        slopeM: meanOrNull(m.map(r => r.slope)), slopeE: meanOrNull(e.map(r => r.slope)),
+        seM: meanOrNull(m.map(r => r.seSrt)), seE: meanOrNull(e.map(r => r.seSrt)),
+        earGapM: (() => { const R = meanOrNull(m.filter(r=>r.ear==='right').map(r=>r.srt30)), L = meanOrNull(m.filter(r=>r.ear==='left').map(r=>r.srt30)); return R!==null&&L!==null ? R-L : null; })(),
+        nPairs: pp.length,
+        diffRaw: meanOrNull(pp.map(p => p.diff + (offsetActive() ? state.offset.value : 0))),
+        na: meanOrNull([naSrt(pid, 'left'), naSrt(pid, 'right')]) } };
+    });
+    vars = [fv('maori','Mean Māori SRT dB(A)','maori'), fv('english','Mean English SRT dB(A)','english'),
+      fv('diff','Mean Māori − English (dB)','diff'), fv('sdDiff','SD of Māori − English across pairs (dB)','sdDiff'),
+      fv('absDiff','Mean |Māori − English| (dB)','absDiff'),
+      fv('maori20','Mean Māori SRT @20 dB(A)','maori20'), fv('english20','Mean English SRT @20 dB(A)','english20'),
+      fv('trunc','Mean SRT30 − SRT20 (dB)','trunc'), fv('slopeM','Mean psychometric slope — Māori','slopeM'),
+      fv('slopeE','Mean psychometric slope — English','slopeE'), fv('seM','Mean SE of SRT — Māori (dB)','seM'),
+      fv('seE','Mean SE of SRT — English (dB)','seE'), fv('earGapM','Māori SRT right − left (dB)','earGapM'),
+      fv('nPairs','Matched pairs','nPairs'), fv('na','Non-adaptive English SRT, mean of ears dB(A)','na'),
+      { key:'eng_na', label:'Adaptive English − non-adaptive English (dB)', get: r => r.data.english != null && r.data.na != null ? r.data.english - r.data.na : null },
+      { key:'mao_na', label:'Māori − non-adaptive English (dB)', get: r => r.data.maori != null && r.data.na != null ? r.data.maori - r.data.na : null },
+      ...(offsetActive() ? [fv('diffRaw','Mean Māori − English, unadjusted (dB)','diffRaw')] : []),
+      ...ptaVarsParticipant()];
+  }
+  vars = [...vars, ...demoVars()];
+  // Keep only variables that have values and vary.
+  vars = vars.filter(v => { const vals = rows.map(v.get).filter(x => x !== null); return vals.length >= 2 && new Set(vals).size > 1; });
+  return { rows, vars };
+}
+
+const XY_DEFAULTS = { participant: ['pta_json_mean','diff'], ear: ['pta_json','diff'], pair: ['english','maori'], track: ['srt20','srt30'] };
+// Categorical palette (fixed order) — shapes carry identity too, so colour is never the only cue.
+const CAT = ['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300','#6250d6','#e34948'];
+const SHAPES = ['circle','square','triangle','diamond','down','circle','square','triangle'];
+function markSvg(shape, x, y, r, fill, tip) {
+  const t = `<title>${esc(tip)}</title>`, st = `fill="${fill}" fill-opacity="0.85" stroke="#fff" stroke-width="1.2"`;
+  if (shape === 'square') return `<rect x="${(x-r*.9).toFixed(1)}" y="${(y-r*.9).toFixed(1)}" width="${(r*1.8).toFixed(1)}" height="${(r*1.8).toFixed(1)}" ${st}>${t}</rect>`;
+  if (shape === 'triangle') return `<polygon points="${x},${(y-r*1.15).toFixed(1)} ${(x+r*1.05).toFixed(1)},${(y+r*.8).toFixed(1)} ${(x-r*1.05).toFixed(1)},${(y+r*.8).toFixed(1)}" ${st}>${t}</polygon>`;
+  if (shape === 'down') return `<polygon points="${x},${(y+r*1.15).toFixed(1)} ${(x+r*1.05).toFixed(1)},${(y-r*.8).toFixed(1)} ${(x-r*1.05).toFixed(1)},${(y-r*.8).toFixed(1)}" ${st}>${t}</polygon>`;
+  if (shape === 'diamond') return `<polygon points="${x},${(y-r*1.2).toFixed(1)} ${(x+r*1.2).toFixed(1)},${y} ${x},${(y+r*1.2).toFixed(1)} ${(x-r*1.2).toFixed(1)},${y}" ${st}>${t}</polygon>`;
+  return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r}" ${st}>${t}</circle>`;
+}
+
+function explorer() {
+  const level = document.getElementById('xLevel').value;
+  const { rows, vars } = explorerData(level);
+  const xs = document.getElementById('xVar'), ys = document.getElementById('yVar'), cs = document.getElementById('xColour');
+  const opts = vars.map(v => ({ value: v.key, label: v.label }));
+  const keepX = vars.some(v => v.key === xs.value) ? xs.value : (vars.find(v => v.key === XY_DEFAULTS[level][0]) || vars[0] || {}).key;
+  const keepY = vars.some(v => v.key === ys.value) ? ys.value : (vars.find(v => v.key === XY_DEFAULTS[level][1]) || vars[1] || vars[0] || {}).key;
+  fillSelect(xs, opts, keepX); fillSelect(ys, opts, keepY);
+  const colourDefs = [...BUILTIN_COLOUR.filter(c => c.levels.includes(level)), ...segmentDefs().filter(d => !d.multi)];
+  fillSelect(cs, [{ value:'', label:'— none —' }, ...colourDefs.map(d => ({ value: d.id, label: d.label }))]);
+  const curPids = new Set(rows.map(r => r.pid));
+  const ghostRows = state.cur.length === state.records.length ? []
+    : explorerData(level, state.records).rows.filter(r => !curPids.has(r.pid));
+  explorerPlot(rows, vars, colourDefs, level, ghostRows);
+  corrMatrix(rows, vars);
+}
+function explorerPlot(rows, vars, colourDefs, level, ghostRows = []) {
+  const host = document.getElementById('xPlot');
+  const xv = vars.find(v => v.key === document.getElementById('xVar').value);
+  const yv = vars.find(v => v.key === document.getElementById('yVar').value);
+  if (!xv || !yv) { host.innerHTML = '<p class="empty">Not enough variables with data at this unit of analysis yet.</p>'; return; }
+  const cdef = colourDefs.find(d => d.id === document.getElementById('xColour').value);
+  const groupOf = row => cdef ? (cdef.rowGet ? (cdef.rowGet(row)[0] || BLANK) : groupsOf(cdef, row.pid)[0]) : null;
+  const pts = rows.map(r => ({ x: xv.get(r), y: yv.get(r), g: groupOf(r), tip: r.tip }))
+    .filter(p => p.x !== null && p.y !== null);
+  if (pts.length < 2) { host.innerHTML = '<p class="empty">Fewer than two points have both values.</p>'; return; }
+  let groups = cdef ? orderGroups(cdef.rowGet ? {} : cdef, [...new Set(pts.map(p => p.g))]) : [];
+  if (groups.length > CAT.length) {   // fold the tail into "Other" rather than inventing hues
+    const keep = new Set(groups.slice(0, CAT.length - 1));
+    pts.forEach(p => { if (!keep.has(p.g)) p.g = 'Other'; });
+    groups = [...keep, 'Other'];
+  }
+  const fit = S.regress(pts);
+  const useFit = document.getElementById('xFit').checked && fit, useId = document.getElementById('xIdentity').checked;
+
+  const ghost = ghostRows.map(r => ({ x: xv.get(r), y: yv.get(r), tip: r.tip })).filter(p => p.x !== null && p.y !== null);
+  const chart = xyChart({ pts, ghost, groups, xlab: xv.label, ylab: yv.label, identity: useId, fit: useFit ? fit : null });
+  const legendLabel = cdef ? `<div class="legend" style="margin-bottom:-.3rem"><b style="color:var(--ink)">Colour: ${esc(cdef.label)}</b></div>` : '';
+  const pTxt = p => p < 0.001 ? '&lt; 0.001' : '= ' + p.toFixed(3);
+  const sgn = v => v < 0 ? '−' : '+';
+  const nPeople = new Set(rows.filter(r => xv.get(r) !== null && yv.get(r) !== null).map(r => r.pid)).size;
+  // Per-group correlations when coloured
+  const byG = cdef ? groups.map(gl => { const gp = pts.filter(p => p.g === gl); const c = S.corr(gp.map(p => p.x), gp.map(p => p.y));
+      return `<tr><td>${esc(gl)}</td><td class="num">${c.n}</td><td class="num">${fmt(c.r,3)}</td><td class="num">${Number.isFinite(c.p) ? pTxt(c.p).replace('= ','') : '—'}</td></tr>`; }).join('') : '';
+  const stats = fit ? `<dl class="stat">
+      <dt>Points (participants)</dt><dd>${fit.n} (${nPeople})</dd>
+      <dt>Pearson r${fit.rCI ? ' (95% CI)' : ''}</dt><dd>${fmt(fit.r,3)}${fit.rCI ? ` (${fmt(fit.rCI[0],2)} to ${fmt(fit.rCI[1],2)})` : ''}, p ${pTxt(fit.pR)}</dd>
+      <dt>R²</dt><dd>${fmt(fit.r2,3)}</dd>
+      <dt>Spearman ρ</dt><dd>${fmt(fit.rho,3)}</dd>
+      <dt>OLS fit</dt><dd class="mono">y = ${fit.slope.toFixed(3)}x ${sgn(fit.intercept)} ${Math.abs(fit.intercept).toFixed(2)}</dd>
+      <dt>Slope (95% CI)</dt><dd>${fmt(fit.slope,3)} (${fmt(fit.slope-fit.t*fit.seSlope,3)} to ${fmt(fit.slope+fit.t*fit.seSlope,3)})</dd>
+      <dt>Residual SD</dt><dd>${fmt(fit.sres,2)}</dd>
+    </dl>` : `<p class="empty">Need ≥3 points with spread on both axes for a fit.</p>`;
+  const caveat = level === 'participant'
+    ? 'One point per participant, so the points are independent and the p-value is fair (if small-sample).'
+    : `At this unit each participant contributes several points (${level === 'ear' ? 'two ears' : 'ears × repeats'}), so they are not independent: r is a fair description but the CI and p-value are too optimistic. Switch to “Per participant” for an honest test.`;
+  host.innerHTML = `<figure>${chart}${legendLabel}<figcaption>${offsetNote()}${ghost.length ? `<b>Restricted: ${pts.length} point(s) shown; ${ghost.length} excluded as grey rings for context (not in the statistics).</b> ` : ''}Hover a point for its participant and values.</figcaption></figure>
+    ${stats}${byG ? `<table style="max-width:30rem"><thead><tr><th>${esc(cdef.label)}</th><th class="num">n</th><th class="num">r</th><th class="num">p</th></tr></thead><tbody>${byG}</tbody></table>` : ''}
+    <div class="note">${caveat} Correlation is not agreement — for Māori vs English SRT use Lin's ρ<sub>c</sub> in Step 1.</div>`;
+}
+function corrMatrix(rows, vars) {
+  const host = document.getElementById('corrOut');
+  if (vars.length < 2) { host.innerHTML = '<p class="empty">Not enough variables.</p>'; return; }
+  const cols = vars.map(v => rows.map(v.get).map(x => x === null ? NaN : x));
+  const cell = (i, j) => {
+    if (i === j) return `<td class="diag">—</td>`;
+    const c = S.corr(cols[j], cols[i]);
+    if (!Number.isFinite(c.r)) return `<td title="too few points" style="color:var(--mist)">·</td>`;
+    const a = Math.min(1, Math.abs(c.r)) * 0.85, bg = c.r >= 0 ? `rgba(42,111,151,${a.toFixed(2)})` : `rgba(181,80,47,${a.toFixed(2)})`;
+    const star = c.p < 0.05 ? '*' : '';
+    return `<td data-x="${esc(vars[j].key)}" data-y="${esc(vars[i].key)}" style="background:${bg};color:${a > 0.5 ? '#fff' : 'var(--ink)'}"
+      title="${esc(vars[i].label)} vs ${esc(vars[j].label)}: r = ${c.r.toFixed(3)}, n = ${c.n}, p = ${c.p < 0.001 ? '<0.001' : c.p.toFixed(3)}">${c.r.toFixed(2)}${star}</td>`;
+  };
+  host.innerHTML = `<table class="corr"><thead><tr><th></th>${vars.map(v => `<th class="rot"><div>${esc(v.label)}</div></th>`).join('')}</tr></thead><tbody>
+    ${vars.map((v, i) => `<tr><th>${esc(v.label)}</th>${vars.map((_, j) => cell(i, j)).join('')}</tr>`).join('')}</tbody></table>
+    <p class="sub" style="font-size:.85rem">Blue = positive, clay = negative, stronger colour = larger |r|. * p &lt; 0.05 (uncorrected —
+    with this many cells some will be “significant” by chance). Pairwise-complete n; hover for n and p.</p>`;
+  host.querySelectorAll('td[data-x]').forEach(td => td.onclick = () => {
+    document.getElementById('xVar').value = td.dataset.x; document.getElementById('yVar').value = td.dataset.y;
+    explorer(); document.getElementById('xPlot').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Acoustic offset — estimate (Māori − English) in a proficiency band, apply
+   ═════════════════════════════════════════════════════════════════════════
+   Sign convention: offset = Māori SRT − English SRT (dB). Adjusted Māori SRT =
+   raw Māori SRT − offset, at both 30 and 20 words. English SRTs are untouched.
+   Every analysis downstream reads r.srt30 / r.srt20, so all of them see the
+   adjusted values; the raw values stay on each record as srt30raw / srt20raw. */
+const $ = id => document.getElementById(id);
+function computeOffset() {
+  const mode = $('offMode').value;
+  if (mode === 'manual') { const v = Number($('offManual').value); return { mode, value: Number.isFinite(v) ? v : 0 }; }
+  if (mode !== 'band') return { mode: 'none', value: 0 };
+  const lo = Number($('offMin').value), hi = Number($('offMax').value);
+  const inBand = loadedPids().filter(p => { const d = demoFor(p); return d && d.trm != null && d.trm >= lo && d.trm <= hi; });
+  const raw = state.records.filter(r => inBand.includes(r.participant)).map(r => ({ ...r, srt30: r.srt30raw }));
+  const P = pairs(raw);
+  const perP = Object.entries(groupBy(P, p => p.participant))
+    .map(([pid, pp]) => ({ pid, n: pp.length, diff: S.mean(pp.map(p => p.diff)) }))
+    .sort((a, b) => a.pid.localeCompare(b.pid, undefined, { numeric: true }));
+  const base = { mode, lo, hi, perP, nBand: inBand.length,
+    excludePids: $('offExclude').checked ? new Set(inBand) : null };
+  if (!perP.length) return { ...base, value: 0, n: 0, empty: true };
+  const v = perP.map(x => x.diff), n = v.length, mean = S.mean(v), sd = S.sd(v);
+  const ci = n >= 2 ? (t => [mean - t*sd/Math.sqrt(n), mean + t*sd/Math.sqrt(n)])(S.tinv(0.975, n-1)) : null;
+  return { ...base, value: mean, n, nPairs: P.length, sd, ci, pooled: S.mean(P.map(p => p.diff)) };
+}
+function applyOffset(v) {
+  state.records.forEach(r => {
+    const k = r.language === 'maori' ? v : 0;
+    r.srt30 = r.srt30raw == null ? null : +(r.srt30raw - k).toFixed(2);
+    r.srt20 = r.srt20raw == null ? null : +(r.srt20raw - k).toFixed(2);
+  });
+}
+const offsetActive = () => state.offset && state.offset.value !== 0;
+function offsetNote() {
+  return offsetActive() ? `<b>Māori SRTs adjusted by ${state.offset.value > 0 ? '−' : '+'}${fmt(Math.abs(state.offset.value),2)} dB
+    (acoustic offset).</b> ` : '';
+}
+function keyStats(P) {
+  const D = P.map(p => p.diff), n = D.length;
+  if (n < 2) return { n };
+  const m = S.mean(D), sd = S.sd(D), se = sd/Math.sqrt(n), t = S.tinv(0.95, n-1);
+  const fit = S.regress(P.map(p => ({ x: p.english, y: p.maori })));
+  return { n, m, sd, ci: [m - t*se, m + t*se], loa: [m - 1.96*sd, m + 1.96*sd], fit,
+    abs: S.mean(D.map(Math.abs)), tost: d => (m - t*se) > -d && (m + t*se) < d };
+}
+function renderOffsetBox() {
+  const host = $('offsetBox'), o = state.offset;
+  if (o.mode === 'none') { host.innerHTML = ''; return; }
+  let est = '';
+  if (o.mode === 'band') {
+    if (o.empty) { host.innerHTML = `<div class="note"><b>Acoustic offset:</b> no participants with matched pairs have
+      TRM prof ${o.lo}–${o.hi}${state.demo ? '' : ' (load the demographics spreadsheet)'} — no adjustment applied.</div>`; return; }
+    est = `<dl class="stat">
+        <dt>Calibration band</dt><dd>TRM prof ${o.lo}–${o.hi}: ${o.n} participant(s), ${o.nPairs} pair(s)</dd>
+        <dt>Offset = mean of per-participant mean (Māori − English)</dt><dd><b>${fmt(o.value,2)} dB</b></dd>
+        <dt>95% CI for the offset</dt><dd>${o.ci ? `${fmt(o.ci[0],2)} to ${fmt(o.ci[1],2)} dB` : '— (needs ≥2 people)'}</dd>
+        <dt>SD between participants</dt><dd>${fmt(o.sd,2)} dB</dd>
+        <dt>Pooled mean over all pairs (for comparison)</dt><dd>${fmt(o.pooled,2)} dB</dd>
+      </dl>
+      <p class="sub" style="font-size:.85rem">Per participant: ${o.perP.map(x => `P${esc(x.pid)} ${fmt(x.diff,1)}`).join(' · ')}.
+      Estimated from all loaded participants in the band, regardless of the restriction above.</p>
+      ${o.excludePids ? `<div class="note">The ${o.nBand} calibration participant(s) are <b>left out</b> of every analysis below,
+        so the adjusted results are an independent check of the offset on everyone else.</div>`
+      : `<div class="note">The calibration participants are still <b>in</b> the analyses below, so their own mean difference
+        is ≈ 0 by construction and the overall bias is pulled toward 0. Tick “Leave the calibration band out” for an
+        independent check of the offset on everyone else.</div>`}`;
+  } else est = `<p>Manual offset: <b>${fmt(o.value,2)} dB</b> (Māori − English).</p>`;
+  // Before/after on the same participants (state.cur)
+  const rawP = pairs(state.cur.map(r => ({ ...r, srt30: r.srt30raw }))), adjP = pairs();
+  const A = keyStats(rawP), B = keyStats(adjP);
+  const row = (label, f, d = 2) => `<tr><td>${label}</td><td class="num">${A.n >= 2 ? f(A) : '—'}</td><td class="num">${B.n >= 2 ? f(B) : '—'}</td></tr>`;
+  const yes = b => b ? '<b style="color:var(--spearmint)">yes</b>' : 'no';
+  const swRaw = ['maori','english'].map(l => swFor(state.cur.map(r => ({ ...r, srt30: r.srt30raw })), l).sw30);
+  const swAdj = ['maori','english'].map(l => swFor(state.cur, l).sw30);
+  const cmp = `<table style="max-width:40rem"><thead><tr><th>Same participants (${A.n} pairs)</th><th class="num">Raw</th><th class="num">Adjusted</th></tr></thead><tbody>
+    ${row('Mean Māori − English (bias)', s => fmt(s.m,2) + ' dB')}
+    ${row('90% CI of the bias', s => `${fmt(s.ci[0],2)} to ${fmt(s.ci[1],2)}`)}
+    ${row('Equivalent at ±5 dB (TOST)?', s => yes(s.tost(5)))}
+    ${row('Equivalent at ±3 dB (TOST)?', s => yes(s.tost(3)))}
+    ${row('Mean |Māori − English|', s => fmt(s.abs,2) + ' dB')}
+    ${row('95% limits of agreement (naïve)', s => `${fmt(s.loa[0],1)} to ${fmt(s.loa[1],1)}`)}
+    ${row('SD of differences', s => fmt(s.sd,2))}
+    ${row('Pearson r', s => s.fit ? fmt(s.fit.r,3) : '—')}
+    ${row("Lin's concordance ρ<sub>c</sub>", s => s.fit ? fmt(s.fit.ccc,3) : '—')}
+    ${row('Deming fit', s => s.fit ? `y = ${s.fit.dSlope.toFixed(2)}x ${s.fit.dInt < 0 ? '−' : '+'} ${Math.abs(s.fit.dInt).toFixed(1)}` : '—')}
+    <tr><td>S_w Māori / English @30</td><td class="num">${fmt(swRaw[0],2)} / ${fmt(swRaw[1],2)}</td><td class="num">${fmt(swAdj[0],2)} / ${fmt(swAdj[1],2)}</td></tr>
+    </tbody></table>
+    <p class="sub" style="font-size:.85rem">A constant shift can only move the bias, its CI, the intercepts, ρ<sub>c</sub> and the TOST
+    verdict. The spread of the differences, r, the slopes, the width of the limits of agreement and test–retest reliability
+    don't change. If the spread is still wide after adjustment, a single correction won't make the tests interchangeable for individuals.</p>`;
+  host.innerHTML = `<div class="card" style="border-color:var(--maori)"><h3 style="margin-top:0">Acoustic offset applied to every result below</h3>
+    <p>Māori SRTs shifted by <b>${o.value > 0 ? '−' : '+'}${fmt(Math.abs(o.value),2)} dB</b> at both 20 and 30 words; English untouched.</p>
+    ${est}${cmp}</div>`;
+}
+function populateOffsetSelects() {
+  const lv = state.demo && !state.demo.error
+    ? [...new Set(Object.values(state.demo.byId).map(d => d.trm).filter(Number.isFinite))].sort((a, b) => a - b) : [];
+  const levels = lv.length ? lv : [1, 2, 3, 4, 5];
+  const opts = levels.map(v => ({ value: String(v), label: String(v) }));
+  const mn = $('offMin'), mx = $('offMax');
+  fillSelect(mn, opts, mn.value || String(levels.includes(4) ? 4 : levels[levels.length - 1]));
+  fillSelect(mx, opts, mx.value || String(levels[levels.length - 1]));
+  offsetVisibility();
+}
+function offsetVisibility() {
+  const m = $('offMode').value;
+  document.querySelectorAll('.offBand').forEach(e => e.style.display = m === 'band' ? '' : 'none');
+  document.querySelectorAll('.offManual').forEach(e => e.style.display = m === 'manual' ? '' : 'none');
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Non-adaptive SRT — fit the three fixed-level list scores per ear
+   ═════════════════════════════════════════════════════════════════════════ */
+function naFromPayload(d) {
+  const floors = (Array.isArray(d.adaptiveTracks) ? d.adaptiveTracks : []).map(t => Number(t.perUnitFloor)).filter(Number.isFinite).sort((a, b) => a - b);
+  const floor = floors.length ? floors[Math.floor(floors.length / 2)] : 0;
+  const ears = {};
+  const add = (ear, lang, e) => { ears[ear] = ears[ear] || {}; (ears[ear][lang] = ears[ear][lang] || []).push(e); };
+  const res = Array.isArray(d.results) ? d.results.filter(r => !r.adaptive) : [];
+  if (res.length) res.forEach(r => {
+    const ear = String(r.presentationCondition || r.stimulusEar || '').toLowerCase();
+    const L = Number(r.listLevelDbA), ph = Number(r.phonemeCount), c = Number(r.score);
+    if ((ear !== 'left' && ear !== 'right') || !Number.isFinite(L) || !(ph > 0) || !Number.isFinite(c)) return;
+    add(ear, String(r.language || 'english').toLowerCase(), { level: L, correct: Math.min(c, ph), phonemes: ph, list: r.listNumber });
+  });
+  else (Array.isArray(d.summaries) ? d.summaries : []).forEach(sm => {
+    const ear = String(sm.ear || sm.condition || '').toLowerCase();
+    if ((ear !== 'left' && ear !== 'right') || !Number.isFinite(Number(sm.level))) return;
+    add(ear, String(sm.language || 'english').toLowerCase(), { level: Number(sm.level), correct: Number(sm.phonemes), phonemes: Number(sm.phonemeTotal), list: sm.listNumber });
+  });
+  return { floor, ears };
+}
+function fitNonAdaptive() {
+  const fixed = $('naSlope').value === 'fixed', useTracks = $('naFloor').value === 'tracks';
+  state.naFit = {};
+  Object.entries(state.na).forEach(([pid, na]) => {
+    const out = state.naFit[pid] = {};
+    Object.entries(na.ears).forEach(([ear, byLang]) => {
+      out[ear] = {};
+      Object.entries(byLang).forEach(([lang, entries]) => {
+        const fit = FIT.fit(entries, { language: lang, floor: useTracks ? na.floor : 0, forceFixed: fixed });
+        const lists = Object.values(groupBy(entries, e => e.list + '@' + e.level)).map(g => ({
+          list: g[0].list, level: g[0].level,
+          pct: 100 * g.reduce((s, e) => s + e.correct, 0) / g.reduce((s, e) => s + e.phonemes, 0) }))
+          .sort((a, b) => b.level - a.level);
+        out[ear][lang] = fit ? { ...fit, lists } : { srt: null, lists };
+      });
+    });
+  });
+}
+const naSrt = (pid, ear, lang = 'english') => { const f = state.naFit[pid]?.[ear]?.[lang]; return f && Number.isFinite(f.srt) ? f.srt : null; };
+
+function naSection() {
+  const host = $('naOut');
+  const pids = [...new Set(state.cur.map(r => r.participant))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const rows = [], missing = [];
+  pids.forEach(pid => ['right', 'left'].forEach(ear => {
+    const f = state.naFit[pid]?.[ear]?.english;
+    const recs = state.cur.filter(r => r.participant === pid && r.ear === ear && r.srt30 != null);
+    if (!f) { if (ear === 'right' && !state.naFit[pid]?.left?.english) missing.push(pid); return; }
+    const e = recs.filter(r => r.language === 'english').map(r => r.srt30), m = recs.filter(r => r.language === 'maori').map(r => r.srt30);
+    rows.push({ pid, ear, f, na: Number.isFinite(f.srt) ? f.srt : null,
+      eng: e.length ? S.mean(e) : null, nE: e.length, mao: m.length ? S.mean(m) : null, nM: m.length });
+  }));
+  if (!rows.length) { host.innerHTML = '<p class="empty">No non-adaptive list scores in these files.</p>'; return; }
+  const agree = (key, label) => {
+    const P = rows.filter(r => r.na != null && r[key] != null).map(r => ({ x: r.na, y: r[key] }));
+    if (P.length < 2) return `<tr><td>${label}</td><td colspan="6" class="empty">too few ears</td></tr>`;
+    const D = P.map(p => p.y - p.x), n = D.length, m = S.mean(D), sd = S.sd(D), t = S.tinv(0.975, n-1), fit = S.regress(P);
+    return `<tr><td>${label}</td><td class="num">${n}</td><td class="num"><b>${fmt(m,2)}</b> (${fmt(m - t*sd/Math.sqrt(n),2)} to ${fmt(m + t*sd/Math.sqrt(n),2)})</td>
+      <td class="num">${fmt(sd,2)}</td><td class="num">${fmt(m - 1.96*sd,1)} to ${fmt(m + 1.96*sd,1)}</td>
+      <td class="num">${fit ? fmt(fit.r,3) : '—'}</td><td class="num">${fit ? fmt(fit.ccc,3) : '—'}</td></tr>`;
+  };
+  const pts = [
+    ...rows.filter(r => r.na != null && r.eng != null).map(r => ({ x: r.na, y: r.eng, g: 'Adaptive English', tip: `P${r.pid} ${r.ear}` })),
+    ...rows.filter(r => r.na != null && r.mao != null).map(r => ({ x: r.na, y: r.mao, g: 'Adaptive Māori', tip: `P${r.pid} ${r.ear}` }))];
+  const chart = pts.length >= 2 ? xyChart({ pts, groups: ['Adaptive English', 'Adaptive Māori'], identity: true,
+    xlab: 'Non-adaptive English SRT dB(A)', ylab: 'Adaptive SRT dB(A) (mean of repeats)' }) : '';
+  const tbl = `<div class="scroll"><table><thead><tr><th>Participant</th><th>Ear</th><th>Lists: level dB(A) → % phonemes</th>
+      <th class="num">Non-adaptive SRT</th><th class="num">Slope</th><th>Fit</th><th class="num">Adaptive Eng</th>
+      <th class="num">Adapt − NA</th><th class="num">Māori</th><th class="num">Māori − NA</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td>${esc(r.pid)}</td><td>${r.ear}</td>
+      <td style="font-size:.82rem">${r.f.lists.map(l => `${fmt(l.level,0)}→${fmt(l.pct,0)}%`).join(', ')}</td>
+      <td class="num"><b>${fmt(r.na,2)}</b></td><td class="num">${r.f.slope ? fmt(r.f.slope,3) : '—'}</td>
+      <td style="font-size:.82rem">${r.f.method && r.f.method !== 'free-slope' ? esc(r.f.method) : ''}</td>
+      <td class="num">${fmt(r.eng,2)}${r.nE ? ` <span style="color:var(--mist)">(${r.nE})</span>` : ''}</td>
+      <td class="num">${r.eng != null && r.na != null ? fmt(r.eng - r.na,2) : '—'}</td>
+      <td class="num">${fmt(r.mao,2)}</td><td class="num">${r.mao != null && r.na != null ? fmt(r.mao - r.na,2) : '—'}</td></tr>`).join('')}
+    </tbody></table></div>`;
+  host.innerHTML = `
+    <table><thead><tr><th>Comparison (per ear)</th><th class="num">Ears</th><th class="num">Mean diff (95% CI)</th>
+      <th class="num">SD</th><th class="num">95% LoA</th><th class="num">r</th><th class="num">ρ<sub>c</sub></th></tr></thead><tbody>
+      ${agree('eng', 'Adaptive English − non-adaptive English')}
+      ${agree('mao', `Adaptive Māori${offsetActive() ? ' (adjusted)' : ''} − non-adaptive English`)}
+    </tbody></table>
+    ${chart ? `<figure>${chart}<figcaption>${offsetNote()}Each point is one ear; adaptive SRT is the mean of that ear's repeats.
+      Dashed: y = x. Hover for the participant.</figcaption></figure>` : ''}
+    ${tbl}
+    ${missing.length ? `<p class="sub">No non-adaptive scores for: ${missing.map(esc).join(', ')}.</p>` : ''}
+    <div class="note">The non-adaptive SRT is the 50% point of the same per-phoneme logistic the app fits to adaptive tracks
+    (ported from adaptive.js), fitted to the 3 lists × 10 words × 3 phonemes at each list's presentation level. With only
+    three levels the slope is weakly determined: if a free fit is degenerate it falls back to the fixed English slope
+    (0.076/dB), as the app does. Use “Fixed slope” to put every ear on that footing. Ears are treated as independent here.</div>`;
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   Test–retest reliability (repeats within participant × ear)
+   ═════════════════════════════════════════════════════════════════════════ */
+S.fcdf = (F, d1, d2) => F <= 0 ? 0 : 1 - S.betai(d2/2, d1/2, d2/(d2 + d1*F));
+S.finv = (p, d1, d2) => { let lo = 0, hi = 1; while (S.fcdf(hi, d1, d2) < p && hi < 1e6) hi *= 2;
+  for (let i = 0; i < 200; i++) { const mid = (lo + hi)/2; if (S.fcdf(mid, d1, d2) < p) lo = mid; else hi = mid; } return (lo + hi)/2; };
+// One-way random-effects ICC(1,1) for unbalanced cells, with the Shrout–Fleiss F-based 95% CI.
+function icc1(cells) {
+  const c = cells.filter(x => x.length >= 1), a = c.length, N = c.reduce((s, x) => s + x.length, 0);
+  if (a < 2 || N - a < 1) return null;
+  const gm = S.mean(c.flat());
+  const msb = c.reduce((s, x) => s + x.length * (S.mean(x) - gm)**2, 0) / (a - 1);
+  const msw = c.reduce((s, x) => { const m = S.mean(x); return s + x.reduce((q, v) => q + (v - m)**2, 0); }, 0) / (N - a);
+  const k0 = (N - c.reduce((s, x) => s + x.length**2, 0) / N) / (a - 1);
+  if (msw === 0) return null;
+  const icc = (msb - msw) / (msb + (k0 - 1) * msw), F = msb / msw;
+  const FL = F / S.finv(0.975, a - 1, N - a), FU = F * S.finv(0.975, N - a, a - 1);
+  return { icc, lo: (FL - 1) / (FL + k0 - 1), hi: (FU - 1) / (FU + k0 - 1), a, N, k0 };
+}
+function retest() {
+  const host = $('retest');
+  const langs = [['maori', 'Māori (CVCV)'], ['english', 'English (CVC)']];
+  const cellsFor = (lang, field) => Object.values(groupBy(state.cur.filter(r => r.language === lang && r[field] != null),
+    r => r.participant + '|' + r.ear)).map(c => c.slice().sort((a, b) => a.repeat - b.repeat));
+  const sumRows = [], pracRows = [], pts = [];
+  langs.forEach(([lang, label]) => {
+    ['srt30', 'srt20'].forEach(field => {
+      const cells = cellsFor(lang, field), vals = cells.map(c => c.map(r => r[field])).filter(v => v.length >= 2);
+      const ic = icc1(vals);
+      const sw = (() => { let ss = 0, df = 0; vals.forEach(v => { const m = S.mean(v); ss += v.reduce((q, x) => q + (x - m)**2, 0); df += v.length - 1; });
+        return df ? Math.sqrt(ss / df) : NaN; })();
+      const between = S.sd(vals.map(v => S.mean(v)));
+      sumRows.push(`<tr><td>${label}</td><td>${field === 'srt30' ? '30 words' : '20 words'}</td><td class="num">${vals.length}</td>
+        <td class="num">${fmt(sw,2)}</td><td class="num">${fmt(2.77*sw,1)}</td><td class="num">${fmt(between,2)}</td>
+        <td class="num">${ic ? `<b>${fmt(ic.icc,3)}</b> (${fmt(ic.lo,2)} to ${fmt(ic.hi,2)})` : '—'}</td></tr>`);
+      if (field !== 'srt30') return;
+      const byRep = k => cells.map(c => c.find(r => r.repeat === k)).filter(Boolean).map(r => r[field]);
+      const maxRep = Math.max(0, ...cells.map(c => Math.max(...c.map(r => r.repeat))));
+      const diffs = (a, b) => cells.map(c => { const x = c.find(r => r.repeat === a), y = c.find(r => r.repeat === b);
+        return x && y ? { x: x[field], y: y[field], tip: `P${x.participant} ${x.ear}: rep ${a}→${b}` } : null; }).filter(Boolean);
+      const cell = (a, b) => { const d = diffs(a, b), D = d.map(p => p.y - p.x), n = D.length;
+        if (n < 2) return '<td class="num">—</td>';
+        const m = S.mean(D), sd = S.sd(D), t = S.tinv(0.975, n-1), c = S.corr(d.map(p => p.x), d.map(p => p.y));
+        const sig = (m - t*sd/Math.sqrt(n)) > 0 || (m + t*sd/Math.sqrt(n)) < 0;
+        return `<td class="num">${sig ? '<b>' : ''}${fmt(m,2)}${sig ? '</b>' : ''} (${fmt(m - t*sd/Math.sqrt(n),2)} to ${fmt(m + t*sd/Math.sqrt(n),2)})
+          <br><span style="color:var(--mist);font-size:.8rem">SD ${fmt(sd,2)} · r ${fmt(c.r,2)} · n ${n}</span></td>`; };
+      pracRows.push(`<tr><td>${label}</td>${[1, 2, 3].map(k => { const v = byRep(k); return `<td class="num">${v.length ? fmt(S.mean(v),2) : '—'}
+          <span style="color:var(--mist);font-size:.8rem">(${v.length})</span></td>`; }).join('')}
+        ${cell(1, 2)}${cell(2, 3)}${cell(1, 3)}</tr>`);
+      for (let k = 1; k < maxRep; k++) diffs(k, k + 1).forEach(p => pts.push({ ...p, g: label }));
+    });
+  });
+  const chart = pts.length >= 2 ? xyChart({ pts, groups: langs.map(l => l[1]), identity: true,
+    xlab: 'SRT on repeat k, dB(A)', ylab: 'SRT on repeat k + 1, dB(A)' }) : '';
+  host.innerHTML = `
+    <h3>Within-subject error and ICC (repeats within each participant × ear)</h3>
+    <table><thead><tr><th>Test</th><th>Track</th><th class="num">Cells (≥2 reps)</th><th class="num">S_w = SEM (dB)</th>
+      <th class="num">RC / MDC95 (dB)</th><th class="num">SD between cells</th><th class="num">ICC(1,1) (95% CI)</th></tr></thead>
+      <tbody>${sumRows.join('')}</tbody></table>
+    <h3>Practice / order effects</h3>
+    <table><thead><tr><th>Test</th><th class="num">Mean rep 1</th><th class="num">Mean rep 2</th><th class="num">Mean rep 3</th>
+      <th class="num">Rep 2 − rep 1</th><th class="num">Rep 3 − rep 2</th><th class="num">Rep 3 − rep 1</th></tr></thead>
+      <tbody>${pracRows.join('')}</tbody></table>
+    ${chart ? `<figure>${chart}<figcaption>Each point is one ear's consecutive pair of repeats (1→2, 2→3), SRT@30. Dashed: y = x —
+      points below it improved on retest.</figcaption></figure>` : ''}
+    <div class="note">S_w (the standard error of measurement) is the pooled SD of repeats within each participant × ear; RC = 2.77·S_w
+    is the smallest change between two tests on the same ear that exceeds measurement error (95%). ICC(1,1) is the share of SRT
+    variance that is between ears rather than between repeats — it depends on how varied the sample's hearing is, so read it
+    alongside S_w. Repeats use different lists, so list differences count as error here, which is the clinically relevant
+    test–retest. Bold practice effects have 95% CIs that exclude 0. Ears are treated as independent cells; the acoustic offset
+    doesn't affect any of this (a constant shift cancels).</div>`;
+}
+
+/* Generic multi-series XY chart (shared by the explorer, non-adaptive and test–retest views). */
+function xyChart({ pts, ghost = [], groups = [], xlab, ylab, identity = false, fit = null, W = 640, H = 400 }) {
+  const m = { l: 60, r: 16, t: 16, b: 48 };
+  const style = g => { const i = groups.indexOf(g); return i < 0 ? { c: '#2a6f97', s: 'circle' } : { c: g === 'Other' ? '#8fa1a8' : CAT[i], s: SHAPES[i] }; };
+  const all = pts.concat(ghost);
+  let xmin = Math.min(...all.map(p => p.x)), xmax = Math.max(...all.map(p => p.x));
+  let ymin = Math.min(...all.map(p => p.y)), ymax = Math.max(...all.map(p => p.y));
+  if (identity) { xmin = ymin = Math.min(xmin, ymin); xmax = ymax = Math.max(xmax, ymax); }
+  const px = (xmax - xmin || 2) * 0.08, py = (ymax - ymin || 2) * 0.08;
+  xmin -= px; xmax += px; ymin -= py; ymax += py;
+  const X = v => m.l + (v - xmin) / (xmax - xmin) * (W - m.l - m.r), Y = v => H - m.b - (v - ymin) / (ymax - ymin) * (H - m.t - m.b);
+  const ticks = (a, b) => { const st = niceStep((b - a) / 6), t = []; for (let v = Math.ceil(a / st) * st; v <= b; v += st) t.push(+v.toFixed(3)); return t; };
+  let g = '';
+  ticks(xmin, xmax).forEach(v => { g += `<line x1="${X(v)}" y1="${m.t}" x2="${X(v)}" y2="${H-m.b}" stroke="#eef1f0"/>
+    <text x="${X(v)}" y="${H-m.b+16}" font-size="11" fill="#8fa1a8" text-anchor="middle">${v}</text>`; });
+  ticks(ymin, ymax).forEach(v => { g += `<line x1="${m.l}" y1="${Y(v)}" x2="${W-m.r}" y2="${Y(v)}" stroke="#eef1f0"/>
+    <text x="${m.l-8}" y="${Y(v)+4}" font-size="11" fill="#8fa1a8" text-anchor="end">${v}</text>`; });
+  const id = 'xclip' + (++clipSeq);
+  let over = `<defs><clipPath id="${id}"><rect x="${m.l}" y="${m.t}" width="${W-m.l-m.r}" height="${H-m.t-m.b}"/></clipPath></defs><g clip-path="url(#${id})">`;
+  if (identity) { const lo = Math.max(xmin, ymin), hi = Math.min(xmax, ymax);
+    over += `<line x1="${X(lo)}" y1="${Y(lo)}" x2="${X(hi)}" y2="${Y(hi)}" stroke="#8fa1a8" stroke-dasharray="4 4"/>`; }
+  if (fit) {
+    const N = 40, xa = []; for (let i = 0; i <= N; i++) xa.push(fit.xmin + (fit.xmax - fit.xmin) * i / N);
+    const up = xa.map(x => `${X(x).toFixed(1)},${Y(fit.band(x)[1]).toFixed(1)}`);
+    const dn = xa.slice().reverse().map(x => `${X(x).toFixed(1)},${Y(fit.band(x)[0]).toFixed(1)}`);
+    over += `<polygon points="${up.concat(dn).join(' ')}" fill="#1f8a70" fill-opacity="0.12"/>
+      <line x1="${X(fit.xmin)}" y1="${Y(fit.intercept + fit.slope * fit.xmin)}" x2="${X(fit.xmax)}" y2="${Y(fit.intercept + fit.slope * fit.xmax)}" stroke="#1f8a70" stroke-width="2"/>`;
+  }
+  over += '</g>';
+  const ghostDots = ghost.map(p => `<circle cx="${X(p.x).toFixed(1)}" cy="${Y(p.y).toFixed(1)}" r="4.5" fill="none" stroke="#b9c4c8" stroke-width="1"><title>${esc(p.tip)} (excluded by restriction)</title></circle>`).join('');
+  const dots = ghostDots + pts.map(p => { const s = style(p.g);
+    return markSvg(s.s, X(p.x), Y(p.y), 5, s.c, `${p.tip}${p.g ? ' · ' + p.g : ''}\n${xlab}: ${fmt(p.x,2)}\n${ylab}: ${fmt(p.y,2)}`); }).join('');
+  const svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(ylab)} versus ${esc(xlab)}">${g}${over}${dots}
+    <text x="${m.l+(W-m.l-m.r)/2}" y="${H-8}" font-size="12" fill="#4a5b64" text-anchor="middle">${esc(xlab)}</text>
+    <text x="16" y="${m.t+(H-m.t-m.b)/2}" font-size="12" fill="#4a5b64" text-anchor="middle" transform="rotate(-90 16 ${m.t+(H-m.t-m.b)/2})">${esc(ylab)}</text></svg>`;
+  const legend = groups.length ? `<div class="legend">${groups.map(gl => { const s = style(gl), n = pts.filter(p => p.g === gl).length;
+      return n ? `<span><svg width="14" height="14" viewBox="0 0 14 14" style="border:0;background:none">${markSvg(s.s, 7, 7, 5, s.c, gl)}</svg>${esc(gl)} (${n})</span>` : ''; }).join('')}</div>` : '';
+  return svg + legend;
+}
+
+/* ── Control wiring ───────────────────────────────────────────────────── */
+['offMode','offMin','offMax','offManual','offExclude','naSlope','naFloor'].forEach(id =>
+  $(id).addEventListener('change', () => { offsetVisibility(); rerun(); }));
+document.getElementById('filterVar').onchange = () => { populateFilterVals(); rerun(); };
+document.getElementById('filterVal').onchange = rerun;
+document.getElementById('ptaSource').onchange = rerun;
+document.getElementById('ageCuts').onchange = () => { populateSegmentSelects(); rerun(); };
+document.getElementById('segVar').onchange = segmented;
+document.getElementById('segMetric').onchange = segmented;
+['xLevel','xVar','yVar','xColour','xFit','xIdentity'].forEach(id => document.getElementById(id).onchange = explorer);
+populateSegmentSelects();
+
+function groupBy(arr, keyFn){ const o={}; arr.forEach(x=>{ const k=keyFn(x); (o[k]=o[k]||[]).push(x); }); return o; }
+</script>
+</body>
+</html>
