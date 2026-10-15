@@ -181,6 +181,11 @@
       <label class="offBand">TRM prof from <select id="offMin"></select></label>
       <label class="offBand">to <select id="offMax"></select></label>
       <label class="offManual">Offset (dB) <input type="text" id="offManual" value="0"></label>
+      <label class="offAny">Apply the correction to
+        <select id="offTarget">
+          <option value="maori">Māori SRTs (subtract the offset)</option>
+          <option value="english">English SRTs, adaptive + non-adaptive (add the offset)</option>
+        </select></label>
       <label class="inline offBand"><input type="checkbox" id="offExclude"> Leave the calibration band out of the adjusted analyses</label>
     </div>
   </div>
@@ -195,6 +200,9 @@
     <h2>The data (Step 1)</h2>
     <div id="plots"></div>
     <div id="srtTable"></div>
+
+    <h2>SRT relative to the audiogram (Step 1b)</h2>
+    <div id="ptaAgree"></div>
 
     <h2>Constant vs person-varying offset (Step 3 — provisional)</h2>
     <div id="step3"></div>
@@ -682,7 +690,7 @@ function run(scroll = true) {
   applyPtaSource();
   fitNonAdaptive();
   state.offset = computeOffset();
-  applyOffset(state.offset.value);
+  applyOffset();
   state.cur = filteredRecords();
   if (state.offset.excludePids) state.cur = state.cur.filter(r => !state.offset.excludePids.has(r.participant));
   renderFilterBanner();
@@ -696,6 +704,7 @@ function run(scroll = true) {
   step2(P);
   step1plots(P);
   srtTable();
+  ptaAgree();
   step3(P);
   step4(P);
   step6();
@@ -742,7 +751,7 @@ function step2(P) {
       <span class="big">${verdictText}</span>
     </div>
     <div class="detail">Mean Māori−English difference ${fmt(m)} dB (90% CI ${fmt(ci90[0])} to ${fmt(ci90[1])} dB),
-      over ${n} matched pair(s). ${offsetActive() ? `Māori SRTs adjusted by ${fmt(-state.offset.value,2)} dB for the acoustic offset (see above). ` : ''}TOST concludes equivalence only if the 90% CI lies entirely inside the margin.</div></div>`;
+      over ${n} matched pair(s). ${offsetActive() ? `${offsetLang()} SRTs adjusted by ${offsetShiftText()} for the acoustic offset (see above). ` : ''}TOST concludes equivalence only if the 90% CI lies entirely inside the margin.</div></div>`;
   box.innerHTML = `
     <dl class="stat">
       <dt>Mean difference (Māori − English)</dt><dd>${fmt(m)} dB</dd>
@@ -765,7 +774,8 @@ function step1plots(P) {
   if (P.length < 1) { host.innerHTML = '<p class="empty">No paired data to plot.</p>'; return; }
   const xy = P.map(p=>({x:p.english, y:p.maori}));
   const fit = S.regress(xy);
-  const s1 = scatter(xy, 'English SRT dB(A)', offsetActive() ? 'Māori SRT dB(A), offset-adjusted' : 'Māori SRT dB(A)', true, fit, ghostP.map(p=>({x:p.english, y:p.maori})));
+  const adjL = l => offsetActive() && offsetLang() === l ? ', offset-adjusted' : '';
+  const s1 = scatter(xy, 'English SRT dB(A)' + adjL('English'), 'Māori SRT dB(A)' + adjL('Māori'), true, fit, ghostP.map(p=>({x:p.english, y:p.maori})));
   const sgn = v => v<0 ? '−' : '+';
   const pTxt = p => p<0.001 ? '&lt; 0.001' : '= '+p.toFixed(3);
   const fitBox = fit ? `
@@ -875,17 +885,17 @@ function srtTable() {
   </tbody></table>`;
 }
 document.getElementById('csvBtn').onclick = () => {
-  applyPtaSource(); fitNonAdaptive(); state.offset = computeOffset(); applyOffset(state.offset.value);
+  applyPtaSource(); fitNonAdaptive(); state.offset = computeOffset(); applyOffset();
   const ethCols = state.demo ? state.demo.ethCols : [];
   const head = ['participant','language','ear','repeat','lists','srt20_dB','srt30_dB','trunc_30_minus_20','reversals','se_srt_dB','fit_method',
-    'pta_dBHL_json','pta_dBHL_sheet','converged','file','srt30_raw_dB','srt20_raw_dB','acoustic_offset_applied_dB','nonadaptive_english_srt_this_ear',
+    'pta_dBHL_json','pta_dBHL_sheet','converged','file','srt30_raw_dB','srt20_raw_dB','offset_shift_added_dB','nonadaptive_english_srt_this_ear',
     'age','age_band','gender', ...ethCols.map(c=>c.key), 'eth_prioritised','trm_prof'];
   const rows = state.records.map(r => {
     const dm = demoFor(r.participant) || {};
     return [r.participant,r.language,r.ear,r.repeat,r.lists,
       r.srt20??'',r.srt30??'',(r.srt20!=null&&r.srt30!=null)?(r.srt30-r.srt20).toFixed(2):'',
       r.reversals??'',r.seSrt??'',r.method??'',r.ptaJson??'',r.ptaSheet??'',r.converged?1:0,r.file,
-      r.srt30raw??'',r.srt20raw??'',r.language==='maori'?(state.offset?.value||0):0, naSrt(r.participant,r.ear)!=null?naSrt(r.participant,r.ear).toFixed(2):'',
+      r.srt30raw??'',r.srt20raw??'',offsetShift(r.language), naSrt(r.participant,r.ear)!=null?naSrt(r.participant,r.ear).toFixed(2):'',
       dm.age??'', dm.age!=null?ageBand(dm.age):'', dm.gender??'', ...ethCols.map(c=>dm.eth?.[c.key]??''),
       dm.ethPrioritised??'', dm.trm??''];
   });
@@ -1608,12 +1618,16 @@ function corrMatrix(rows, vars) {
 /* ═════════════════════════════════════════════════════════════════════════
    Acoustic offset — estimate (Māori − English) in a proficiency band, apply
    ═════════════════════════════════════════════════════════════════════════
-   Sign convention: offset = Māori SRT − English SRT (dB). Adjusted Māori SRT =
-   raw Māori SRT − offset, at both 30 and 20 words. English SRTs are untouched.
+   Sign convention: offset = Māori SRT − English SRT (dB). The user chooses which test
+   is corrected: Māori → Māori − offset; English → English + offset (adaptive and
+   non-adaptive). The other test is untouched. Applies at both 30 and 20 words.
    Every analysis downstream reads r.srt30 / r.srt20, so all of them see the
    adjusted values; the raw values stay on each record as srt30raw / srt20raw. */
 const $ = id => document.getElementById(id);
 function computeOffset() {
+  const o = computeOffsetValue(); o.target = $('offTarget').value; return o;
+}
+function computeOffsetValue() {
   const mode = $('offMode').value;
   if (mode === 'manual') { const v = Number($('offManual').value); return { mode, value: Number.isFinite(v) ? v : 0 }; }
   if (mode !== 'band') return { mode: 'none', value: 0 };
@@ -1631,17 +1645,27 @@ function computeOffset() {
   const ci = n >= 2 ? (t => [mean - t*sd/Math.sqrt(n), mean + t*sd/Math.sqrt(n)])(S.tinv(0.975, n-1)) : null;
   return { ...base, value: mean, n, nPairs: P.length, sd, ci, pooled: S.mean(P.map(p => p.diff)) };
 }
-function applyOffset(v) {
+// Correcting Māori: Māori − offset. Correcting English: English + offset (adaptive AND the
+// non-adaptive fit, since they use the same English recordings). Either way every Māori − English
+// difference is identical; only the absolute SRTs (and so their relation to the audiogram) differ.
+const offsetShift = lang => {
+  const o = state.offset; if (!o || !o.value) return 0;
+  if (o.target === 'english') return lang === 'english' ? +o.value : 0;
+  return lang === 'maori' ? -o.value : 0;
+};
+function applyOffset() {
   state.records.forEach(r => {
-    const k = r.language === 'maori' ? v : 0;
+    const k = -offsetShift(r.language);
     r.srt30 = r.srt30raw == null ? null : +(r.srt30raw - k).toFixed(2);
     r.srt20 = r.srt20raw == null ? null : +(r.srt20raw - k).toFixed(2);
   });
 }
 const offsetActive = () => state.offset && state.offset.value !== 0;
+const offsetLang = () => state.offset?.target === 'english' ? 'English' : 'Māori';
+const offsetShiftText = () => { const k = offsetShift(state.offset?.target === 'english' ? 'english' : 'maori');
+  return `${k < 0 ? '−' : '+'}${fmt(Math.abs(k),2)} dB`; };
 function offsetNote() {
-  return offsetActive() ? `<b>Māori SRTs adjusted by ${state.offset.value > 0 ? '−' : '+'}${fmt(Math.abs(state.offset.value),2)} dB
-    (acoustic offset).</b> ` : '';
+  return offsetActive() ? `<b>${offsetLang()} SRTs adjusted by ${offsetShiftText()} (acoustic offset).</b> ` : '';
 }
 function keyStats(P) {
   const D = P.map(p => p.diff), n = D.length;
@@ -1697,7 +1721,10 @@ function renderOffsetBox() {
     verdict. The spread of the differences, r, the slopes, the width of the limits of agreement and test–retest reliability
     don't change. If the spread is still wide after adjustment, a single correction won't make the tests interchangeable for individuals.</p>`;
   host.innerHTML = `<div class="card" style="border-color:var(--maori)"><h3 style="margin-top:0">Acoustic offset applied to every result below</h3>
-    <p>Māori SRTs shifted by <b>${o.value > 0 ? '−' : '+'}${fmt(Math.abs(o.value),2)} dB</b> at both 20 and 30 words; English untouched.</p>
+    <p><b>${offsetLang()}</b> SRTs shifted by <b>${offsetShiftText()}</b> at both 20 and 30 words${o.target === 'english'
+      ? ' (adaptive and non-adaptive English); Māori untouched' : '; English (adaptive and non-adaptive) untouched'}.
+      Every Māori − English difference below is the same whichever test is corrected — the choice only moves absolute SRTs,
+      which matters for agreement with the audiogram (Step 1b) and for anything plotted on an absolute dB(A) axis.</p>
     ${est}${cmp}</div>`;
 }
 function populateOffsetSelects() {
@@ -1714,6 +1741,7 @@ function offsetVisibility() {
   const m = $('offMode').value;
   document.querySelectorAll('.offBand').forEach(e => e.style.display = m === 'band' ? '' : 'none');
   document.querySelectorAll('.offManual').forEach(e => e.style.display = m === 'manual' ? '' : 'none');
+  document.querySelectorAll('.offAny').forEach(e => e.style.display = m === 'none' ? 'none' : '');
 }
 
 /* ═════════════════════════════════════════════════════════════════════════
@@ -1756,7 +1784,7 @@ function fitNonAdaptive() {
     });
   });
 }
-const naSrt = (pid, ear, lang = 'english') => { const f = state.naFit[pid]?.[ear]?.[lang]; return f && Number.isFinite(f.srt) ? f.srt : null; };
+const naSrt = (pid, ear, lang = 'english') => { const f = state.naFit[pid]?.[ear]?.[lang]; return f && Number.isFinite(f.srt) ? f.srt + offsetShift(lang) : null; };
 
 function naSection() {
   const host = $('naOut');
@@ -1767,7 +1795,7 @@ function naSection() {
     const recs = state.cur.filter(r => r.participant === pid && r.ear === ear && r.srt30 != null);
     if (!f) { if (ear === 'right' && !state.naFit[pid]?.left?.english) missing.push(pid); return; }
     const e = recs.filter(r => r.language === 'english').map(r => r.srt30), m = recs.filter(r => r.language === 'maori').map(r => r.srt30);
-    rows.push({ pid, ear, f, na: Number.isFinite(f.srt) ? f.srt : null,
+    rows.push({ pid, ear, f, na: naSrt(pid, ear),
       eng: e.length ? S.mean(e) : null, nE: e.length, mao: m.length ? S.mean(m) : null, nM: m.length });
   }));
   if (!rows.length) { host.innerHTML = '<p class="empty">No non-adaptive list scores in these files.</p>'; return; }
@@ -1785,7 +1813,7 @@ function naSection() {
   const chart = pts.length >= 2 ? xyChart({ pts, groups: ['Adaptive English', 'Adaptive Māori'], identity: true,
     xlab: 'Non-adaptive English SRT dB(A)', ylab: 'Adaptive SRT dB(A) (mean of repeats)' }) : '';
   const tbl = `<div class="scroll"><table><thead><tr><th>Participant</th><th>Ear</th><th>Lists: level dB(A) → % phonemes</th>
-      <th class="num">Non-adaptive SRT</th><th class="num">Slope</th><th>Fit</th><th class="num">Adaptive Eng</th>
+      <th class="num">Non-adaptive SRT${offsetActive() && offsetLang()==='English' ? ' (adj.)' : ''}</th><th class="num">Slope</th><th>Fit</th><th class="num">Adaptive Eng</th>
       <th class="num">Adapt − NA</th><th class="num">Māori</th><th class="num">Māori − NA</th></tr></thead><tbody>
     ${rows.map(r => `<tr><td>${esc(r.pid)}</td><td>${r.ear}</td>
       <td style="font-size:.82rem">${r.f.lists.map(l => `${fmt(l.level,0)}→${fmt(l.pct,0)}%`).join(', ')}</td>
@@ -1798,8 +1826,8 @@ function naSection() {
   host.innerHTML = `
     <table><thead><tr><th>Comparison (per ear)</th><th class="num">Ears</th><th class="num">Mean diff (95% CI)</th>
       <th class="num">SD</th><th class="num">95% LoA</th><th class="num">r</th><th class="num">ρ<sub>c</sub></th></tr></thead><tbody>
-      ${agree('eng', 'Adaptive English − non-adaptive English')}
-      ${agree('mao', `Adaptive Māori${offsetActive() ? ' (adjusted)' : ''} − non-adaptive English`)}
+      ${agree('eng', `Adaptive English − non-adaptive English${offsetActive() && offsetLang()==='English' ? ' (both adjusted)' : ''}`)}
+      ${agree('mao', `Adaptive Māori − non-adaptive English${offsetActive() ? ' (offset applied)' : ''}`)}
     </tbody></table>
     ${chart ? `<figure>${chart}<figcaption>${offsetNote()}Each point is one ear; adaptive SRT is the mean of that ear's repeats.
       Dashed: y = x. Hover for the participant.</figcaption></figure>` : ''}
@@ -1884,6 +1912,50 @@ function retest() {
     doesn't affect any of this (a constant shift cancels).</div>`;
 }
 
+/* ═════════════════════════════════════════════════════════════════════════
+   Step 1b — each test's SRT against the PTA of the same ear
+   ═════════════════════════════════════════════════════════════════════════ */
+function ptaAgree() {
+  const host = $('ptaAgree');
+  const cells = Object.entries(groupBy(state.cur.filter(r => r.pta != null && r.srt30 != null), r => r.participant + '|' + r.ear))
+    .map(([k, rr]) => { const [pid, ear] = k.split('|');
+      const m = rr.filter(r => r.language === 'maori').map(r => r.srt30), e = rr.filter(r => r.language === 'english').map(r => r.srt30);
+      return { pid, ear, pta: rr[0].pta, maori: m.length ? S.mean(m) : null, english: e.length ? S.mean(e) : null, na: naSrt(pid, ear) }; });
+  if (cells.length < 3) { host.innerHTML = '<p class="empty">Need PTA and SRTs for at least three ears.</p>'; return; }
+  const tests = [['maori', 'Māori adaptive (CVCV)', 'maori'], ['english', 'English adaptive (CVC)', 'english'], ['na', 'English non-adaptive', 'english']];
+  const rows = tests.map(([key, label, lang]) => {
+    const c = cells.filter(x => x[key] != null), d = c.map(x => x[key] - x.pta), n = c.length;
+    if (n < 3) return `<tr><td>${label}</td><td colspan="7" class="empty">too few ears</td></tr>`;
+    const fit = S.regress(c.map(x => ({ x: x.pta, y: x[key] }))), m = S.mean(d), sd = S.sd(d), sh = offsetShift(lang);
+    return `<tr><td>${label}</td><td class="num">${n}</td><td class="num"><b>${fmt(m,2)}</b></td>
+      <td class="num">${sh ? fmt(m - sh,2) : '<span style="color:var(--mist)">same</span>'}</td><td class="num">${fmt(sd,2)}</td>
+      <td class="num">${fit ? fmt(fit.r,3) : '—'}</td><td class="num">${fit ? fmt(fit.slope,2) : '—'}</td><td class="num">${fit ? fmt(fit.sres,2) : '—'}</td></tr>`;
+  });
+  // Pitman–Morgan: do the two adaptive tests track the audiogram equally tightly? (paired variances of SRT − PTA)
+  const both = cells.filter(x => x.maori != null && x.english != null);
+  let pm = '';
+  if (both.length >= 4) {
+    const a = both.map(x => x.maori - x.pta), b = both.map(x => x.english - x.pta);
+    const c = S.corr(a.map((v, i) => v + b[i]), a.map((v, i) => v - b[i]));
+    pm = `<p>Pitman–Morgan test, same ${both.length} ears: SD of (SRT − PTA) Māori ${fmt(S.sd(a),2)} vs English ${fmt(S.sd(b),2)} dB,
+      p = ${Number.isFinite(c.p) ? (c.p < 0.001 ? '&lt; 0.001' : c.p.toFixed(3)) : '—'} — ${S.sd(a) < S.sd(b) ? 'Māori' : 'English'} tracks the audiogram more tightly${c.p < 0.05 ? '' : ', but not significantly'}.</p>`;
+  }
+  const pts = [...cells.filter(x => x.maori != null).map(x => ({ x: x.pta, y: x.maori, g: 'Māori adaptive', tip: `P${x.pid} ${x.ear}` })),
+               ...cells.filter(x => x.english != null).map(x => ({ x: x.pta, y: x.english, g: 'English adaptive', tip: `P${x.pid} ${x.ear}` })),
+               ...cells.filter(x => x.na != null).map(x => ({ x: x.pta, y: x.na, g: 'English non-adaptive', tip: `P${x.pid} ${x.ear}` }))];
+  const src = $('ptaSource').value === 'sheet' ? 'spreadsheet' : 'JSON audiogram';
+  host.innerHTML = `<table><thead><tr><th>Test (per ear, mean of repeats)</th><th class="num">Ears</th><th class="num">Mean SRT − PTA</th>
+      <th class="num">…unadjusted</th><th class="num">SD of SRT − PTA</th><th class="num">r with PTA</th><th class="num">Slope on PTA</th>
+      <th class="num">Residual SD</th></tr></thead><tbody>${rows.join('')}</tbody></table>${pm}
+    <figure>${xyChart({ pts, groups: ['Māori adaptive', 'English adaptive', 'English non-adaptive'], xlab: `PTA dB HL (${src})`, ylab: 'SRT dB(A)' })}
+      <figcaption>${offsetNote()}Each point is one ear.</figcaption></figure>
+    <div class="note">SRT is in dB(A) and PTA in dB HL, so SRT − PTA is not expected to be 0 — the mean is a calibration constant,
+    and it's the only column the acoustic offset moves. Which test the offset belongs to can't be settled from this data alone:
+    it needs an external reference, such as the clinic's or published SRT − PTA for the English CVC test in dB(A), or a
+    measurement of the two stimulus sets' RMS levels. What the data <em>can</em> show is which test tracks the audiogram more
+    tightly — the SD of SRT − PTA, r and the residual SD — and none of those depend on the offset or on where it's applied.</div>`;
+}
+
 /* Generic multi-series XY chart (shared by the explorer, non-adaptive and test–retest views). */
 function xyChart({ pts, ghost = [], groups = [], xlab, ylab, identity = false, fit = null, W = 640, H = 400 }) {
   const m = { l: 60, r: 16, t: 16, b: 48 };
@@ -1925,7 +1997,7 @@ function xyChart({ pts, ghost = [], groups = [], xlab, ylab, identity = false, f
 }
 
 /* ── Control wiring ───────────────────────────────────────────────────── */
-['offMode','offMin','offMax','offManual','offExclude','naSlope','naFloor'].forEach(id =>
+['offMode','offMin','offMax','offManual','offExclude','offTarget','naSlope','naFloor'].forEach(id =>
   $(id).addEventListener('change', () => { offsetVisibility(); rerun(); }));
 document.getElementById('filterVar').onchange = () => { populateFilterVals(); rerun(); };
 document.getElementById('filterVal').onchange = rerun;
